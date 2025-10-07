@@ -1,0 +1,99 @@
+we got a working standalone cli tool to study kalman filters. We use the functional programming approach in this script.
+the script is called kalman_filter.py:
+
+
+
+here are the run commands:
+
+
+
+It so happens that we want to refactor this working script into an object-oriented python module within our new digitalControl app, within the kalmanFilters package.
+
+the digitalControl app is organized into several packages:
+
+frequencyResponse
+kalmanFilters
+polePlacement
+polynomialEquations
+quadraticOptimal
+rootLocus
+stateSpace
+zPlaneAnalysis
+zTransform
+rstControllers
+
+each of the modules corresponds to a chapter in Ogata's book Discrete Time Control Systems.
+it so happens that the single script approach is not good architecture. Management asked us to develop a sound architected, object-oriented, test driven modules for each of the topics in the book.
+
+the topic at hand is kalman filters. so we created the kalmanFilter package within the kalmanFilters package within the digitalControl project.
+
+root
+    package1
+    package2
+    .
+    .
+    .
+    kalmanFilters
+        kalmanFilter
+            in
+            out
+            tools
+            tests
+                test_1
+                test_2
+            script_1
+            script_2
+            script_3
+        .
+        .
+        .
+        toolOne
+        toolTwo
+            .
+            .
+            .
+
+where script_1, script_2, script_3 represent the meat and potatoes of the kalmanFilter refactored package.
+Basically we are breaking up kalman_filter.py into several scripts, by separation of concerns following a strict object-oriented approach with test driven development in mind.
+The code must be absolutely testable.
+The code must be scalable. For example, if we want to implement more options or flags.
+
+for the kalman filter tool package, any input files would be stored in kalmanFilters/kalmanFilter/in
+for the kalman filter tool package, any output files would be stored in kalmanFilters/kalmanFilter/out
+
+use decorators as applicable.
+
+test will be stored in kalmanFilters/kalmanFilter/tests
+
+any tools will be stored in kalmanFilters/kalmanFilter/tools
+
+So we are going to build a beautiful architecture, with crisp classes and methods and all the goodies that come with oop approach.
+The proposed architecture for the kalmanFilter package would be something like this:
+
+    app.py
+    apis.py
+    cli.py
+    core.py
+    design.py
+    io.py
+    utils.py
+    tools
+        tool_1.py
+        tool_2.py
+    tests
+        test_1.py
+        test_2.py
+        .
+        .
+        .
+
+It does not have to be like this, but we found that for our robotics project, the hurwitzTool, the icTool, the routhTool, responseTool, compensatorTool, kalmanFilter, systemResponseTool, experimentTool, plotTool, bodeTool, pidTool, zeroPoleTool packages this approach worked well.
+If you find redundancies and would like to streamline that is ok. The important thing is that we break this up for easy understanding, testing, debugging and scalability.
+keep in mind that we will implement TDD with pytest. So the classes and methods should be testable.
+
+Also, when the app is done we want to generate a class diagram. So keep in mind which libraries we can leverage to create a sparkling, cute class diagram.
+Also, if the classes need documentation, let's do that. Perhaps later we can implement a sphinx project to generate the documentation.
+
+So, please go ahead and build this glorious, architecture sound, god tier, kick-ass app to meet the project requirements and tackle kalman filters per the working code and latest facts.
+
+please generate a zip file with all the scripts.

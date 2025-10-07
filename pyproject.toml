@@ -27,6 +27,7 @@ include = [
   "polynomialEquations",
   "quadraticOptimal",
   "rootLocus",
+  "rstControllers",
   "stateSpace",
   "zPlaneAnalysis",
   "zTransform",

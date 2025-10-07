@@ -1,0 +1,7 @@
+{
+  "plant": {"A": [1.0, -0.8], "B": [0.5], "d": 1},
+  "target": {"Acl": [1.0, -1.2, 0.36]},
+  "controller": {"Tmode": "unity_dc", "integrator": false},
+  "simulation": {"N": 100, "r_step": 1.0},
+  "notes": {"Ts": 1.0}
+}
