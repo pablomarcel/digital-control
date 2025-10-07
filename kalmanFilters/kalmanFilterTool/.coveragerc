@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = kalmanFilters/kalmanFilterTool
+
+[html]
+directory = kalmanFilters/kalmanFilterTool/out/htmlcov
+
+[report]
+show_missing = True

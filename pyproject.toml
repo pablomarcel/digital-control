@@ -22,6 +22,7 @@ where = ["."]
 include = [
   "frequencyResponse",
   "intro",
+  "kalmanFilters",
   "polePlacement",
   "polynomialEquations",
   "quadraticOptimal",
