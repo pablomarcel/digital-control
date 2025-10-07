@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = rstControllers/rstTool
+
+[html]
+directory = rstControllers/rstTool/out/htmlcov
+
+[report]
+show_missing = True

@@ -1,0 +1,1450 @@
+we got a working standalone cli tool to study rst controllers. We use the functional programming approach in this script.
+the script is called rst.py:
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+rst.py — God-tier, MATLAB-killer CLI for RST digital control design
+
+Purpose
+-------
+Design, analyze, and simulate two-degree-of-freedom RST controllers for SISO
+plants in the z-domain (delay operator q := z^{-1}). Implements the full
+Diophantine (Bezout) solve for R(q), S(q), and flexible choices for T(q) with
+step-tracking and internal-model options.
+
+**Directory convention (per Management)**
+• Any files **generated** by this tool are **always written to `out/`**.
+• Any files **consumed** by this tool are looked up under **`in/`** by default.
+
+Key equations (notation q = z^{-1})
+-----------------------------------
+Plant:    A(q) y = q^{d} B(q) u + v.
+Controller:  S(q) u = T(q) r - R(q) y.
+Characteristic polynomial target:    A_cl(q) = A(q) S(q) + q^{d} B(q) R(q).
+
+Features
+--------
+• **Square-by-construction Diophantine** with degree allocation (`--alloc S|R`).
+• Degree overrides are now **safe**: if you request larger degrees than needed,
+  the solver uses the minimal square core and **pads extra high-order
+  coefficients with zeros** (keeps your requested orders, avoids rank issues).
+• Pole specification options:
+    - Direct z-plane poles (e.g., 0.6 0.6 0.3)
+    - s-plane poles mapped via z = exp(s·Ts)
+    - Direct A_cl(q) coefficients, or A_cl = Ac·Ao
+• T(q) options:
+    - `unity_dc`: unity step tracking; integrator-aware
+    - `ac`: T(q) = K·Ac(q) (derive Ac = Acl/Ao if only Ao is provided)
+    - `manual`: user-supplied
+• Internal-model integrator: include (1 - q) factor in S-path.
+• Pretty difference equations and CSV/JSON export.
+• Simulation with output disturbance and noise.
+
+Conventions
+-----------
+All polynomials are in q = z^{-1}: A(q) = a0 + a1 q + ··· + a_n q^n (ascending).
+Strings may use spaces and/or commas. Complex numbers use Python syntax ("-3+4j").
+
+Author: Digital Control project — MIT License
+"""
+
+from __future__ import annotations
+import argparse
+import json
+import os
+from dataclasses import dataclass
+from typing import List, Tuple, Optional, Sequence, Union
+
+import numpy as np
+
+# ========================= Utilities: parsing & pretty =========================
+
+def resolve_in_path(name: Optional[str]) -> Optional[str]:
+    """Return path inside `in/` unless name is absolute or already inside in/."""
+    if not name:
+        return None
+    if os.path.isabs(name):
+        return name
+    if name.startswith('in' + os.path.sep) or name.startswith('in/'):
+        return name
+    return os.path.join('in', name)
+
+
+def ensure_out_path(name: Optional[str], default_basename: str) -> Optional[str]:
+    """Return a path under out/ and create the parent directory."""
+    if name is None or len(str(name).strip()) == 0:
+        path = os.path.join('out', default_basename)
+    else:
+        base = os.path.basename(name)
+        path = os.path.join('out', base)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
+
+
+def parse_coeffs(s: Optional[str]) -> Optional[np.ndarray]:
+    """Parse a string of numbers into a float numpy array (ascending in q)."""
+    if s is None:
+        return None
+    toks = s.replace(',', ' ').split()
+    if not toks:
+        return None
+    return np.array([complex(tok) for tok in toks], dtype=complex).real.astype(float)
+
+
+def parse_complex_list(s: str) -> List[complex]:
+    toks = s.replace(',', ' ').split()
+    return [complex(t) for t in toks]
+
+
+def as_array(x: Optional[Union[List[float], np.ndarray]]) -> Optional[np.ndarray]:
+    if x is None:
+        return None
+    return np.array(x, dtype=float)
+
+
+def poly_to_str(p: Sequence[float], var: str = 'q') -> str:
+    terms = []
+    for k, c in enumerate(p):
+        if abs(c) < 1e-14:
+            continue
+        if k == 0:
+            terms.append(f"{c:.6g}")
+        elif k == 1:
+            terms.append(f"{c:.6g}{var}")
+        else:
+            terms.append(f"{c:.6g}{var}^{k}")
+    return ' + '.join(terms) if terms else '0'
+
+
+def stable_all(roots: np.ndarray, tol: float = 1 - 1e-10) -> bool:
+    return np.all(np.abs(roots) < tol)
+
+
+# ======================= Polynomial helpers (q-domain) ========================
+
+def poly_conv(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    return np.convolve(a, b)
+
+
+def poly_add(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    L = max(len(a), len(b))
+    aa = np.pad(a, (0, L - len(a)))
+    bb = np.pad(b, (0, L - len(b)))
+    return aa + bb
+
+
+def poly_shift(p: np.ndarray, d: int) -> np.ndarray:
+    # Multiply by q^d → shift to the right (ascending representation)
+    if d <= 0:
+        return p.copy()
+    return np.pad(p, (d, 0))
+
+
+def poly_from_z_poles(poles: Sequence[complex]) -> np.ndarray:
+    out = np.array([1.0], dtype=complex)
+    for z in poles:
+        out = poly_conv(out, np.array([1.0, -z], dtype=complex))
+    out = np.real_if_close(out, tol=1e-8)
+    return out.astype(float)
+
+
+def poly_from_q_factors(ac: Optional[np.ndarray], ao: Optional[np.ndarray]) -> Optional[np.ndarray]:
+    if ac is None and ao is None:
+        return None
+    if ac is None:
+        return ao.copy()
+    if ao is None:
+        return ac.copy()
+    return poly_conv(ac, ao)
+
+
+def eval_poly_at_one(p: np.ndarray) -> float:
+    return float(np.sum(p))
+
+
+def deconv_poly_asc(num: np.ndarray, den: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Deconvolve ascending-coefficient polynomials: num ≈ den * q + r."""
+    num_desc = num[::-1]
+    den_desc = den[::-1]
+    q_desc, r_desc = np.polydiv(num_desc, den_desc)
+    q = np.real_if_close(q_desc[::-1], tol=1e-9).astype(float)
+    r = np.real_if_close(r_desc[::-1], tol=1e-9).astype(float)
+    # Trim tiny tails
+    eps = 1e-10
+    while len(q) > 1 and abs(q[-1]) < eps:
+        q = q[:-1]
+    while len(r) > 1 and abs(r[-1]) < eps:
+        r = r[:-1]
+    if len(q) == 0:
+        q = np.array([0.0])
+    if len(r) == 0:
+        r = np.array([0.0])
+    return q, r
+
+
+# ========================== Degree policy & Diophantine =======================
+
+def recommended_degrees(A: np.ndarray, B: np.ndarray, d: int, Acl: np.ndarray,
+                        integrator: bool, alloc: str) -> Tuple[int, int]:
+    """Minimal square-by-construction degrees (same policy as docstring)."""
+    na = len(A) - 1
+    nb = len(B) - 1
+    Nc = len(Acl) - 1
+    N0 = na + d + nb - 1
+    m = max(0, Nc - N0)
+    if alloc.lower() == 'r':
+        degS = max(0, d + nb - 1)
+        degR = max(0, na - 1 + m)
+    else:
+        degS = max(0, d + nb - 1 + m)
+        degR = max(0, na - 1)
+    # Note: 'integrator' affects parameterization (S = (1-q) Ŝ) not minimal order itself.
+    return degS, degR
+
+
+def build_conv_matrix(base: np.ndarray, out_len: int, shift: int, cols: int) -> np.ndarray:
+    nb = len(base)
+    M = np.zeros((out_len, cols))
+    for j in range(cols):
+        for i in range(nb):
+            k = i + j + shift
+            if 0 <= k < out_len:
+                M[k, j] = base[i]
+    return M
+
+
+def ensure_rows_cover(Acl: np.ndarray, base_A: np.ndarray, B: np.ndarray, d: int,
+                      degS_hat: int, degR: int) -> np.ndarray:
+    """Pad Acl with zeros only as needed to cover the highest nonzero row index
+    created by the current convolution layout. DO NOT pad just to match #unknowns
+    (that would create zero rows and rank deficiency)."""
+    highest_MA_row = degS_hat + (len(base_A) - 1)
+    highest_MB_row = d + degR
+    M_needed = max(len(Acl), highest_MA_row + 1, highest_MB_row + 1)
+    if len(Acl) < M_needed:
+        return np.pad(Acl, (0, M_needed - len(Acl)))
+    return Acl
+
+
+def diophantine_solve(A: np.ndarray, B: np.ndarray, d: int, Acl: np.ndarray,
+                       degS: Optional[int] = None, degR: Optional[int] = None,
+                       integrator: bool = False, alloc: str = 'S') -> Tuple[np.ndarray, np.ndarray]:
+    """Solve A(q) S(q) + q^d B(q) R(q) = A_cl(q).
+
+    Degree overrides are honored safely:
+      - If user requests larger degrees than the minimal square ones, we solve
+        with the minimal square core and pad extra high-order coefficients with
+        zeros to match the requested orders. This avoids underdetermined / rank
+        issues while keeping the requested polynomial orders.
+    """
+    A = np.array(A, dtype=float)
+    B = np.array(B, dtype=float)
+    Acl = np.array(Acl, dtype=float)
+
+    # Normalize A to monic
+    if abs(A[0] - 1.0) > 1e-12:
+        Acl = Acl / A[0]
+        B = B / A[0]
+        A = A / A[0]
+
+    # Recommended minimal degrees (square-by-construction)
+    degS_rec, degR_rec = recommended_degrees(A, B, d, Acl, integrator, alloc)
+
+    # Target (requested) degrees
+    degS_tar = degS_rec if degS is None else max(0, int(degS))
+    degR_tar = degR_rec if degR is None else max(0, int(degR))
+
+    # Start effective degrees from targets, then shrink extras if underdetermined
+    degS_eff = degS_tar
+    degR_eff = degR_tar
+
+    # Integrator parametrization
+    S_fac = np.array([1.0, -1.0]) if integrator else np.array([1.0])
+    base_A = poly_conv(A, S_fac)
+
+    def n_unknowns(dS: int, dR: int) -> int:
+        dS_hat = max(0, dS - (1 if integrator else 0))
+        return (dS_hat + 1) + (dR + 1)
+
+    # Ensure we have enough rows to cover convolution, but don't add zero rows
+    Acl_eff = ensure_rows_cover(Acl, base_A, B, d,
+                                degS_hat=max(0, degS_eff - (1 if integrator else 0)),
+                                degR=degR_eff)
+
+    # If unknowns exceed rows, *shrink only the extras above the recommended*.
+    while n_unknowns(degS_eff, degR_eff) > len(Acl_eff):
+        if degS_eff > degS_rec:
+            degS_eff -= 1
+        elif degR_eff > degR_rec:
+            degR_eff -= 1
+        else:
+            # Fallback: prefer shrinking S
+            if degS_eff > 0:
+                degS_eff -= 1
+            elif degR_eff > 0:
+                degR_eff -= 1
+            else:
+                break
+        Acl_eff = ensure_rows_cover(Acl, base_A, B, d,
+                                    degS_hat=max(0, degS_eff - (1 if integrator else 0)),
+                                    degR=degR_eff)
+
+    # Build final linear system with effective degrees
+    degS_hat = max(0, degS_eff - (1 if integrator else 0))
+    nS_unknowns = degS_hat + 1
+    nR_unknowns = degR_eff + 1
+
+    MA = build_conv_matrix(base_A, out_len=len(Acl_eff), shift=0, cols=nS_unknowns)
+    MB = build_conv_matrix(B, out_len=len(Acl_eff), shift=d, cols=nR_unknowns)
+    Phi = np.block([MA, MB])
+    bvec = Acl_eff.copy()
+
+    # Solve; if rank-deficient (rare), try shrinking the remaining extras;
+    # finally fall back to min-norm pseudoinverse.
+    for _ in range(10):
+        x, _, rank, _ = np.linalg.lstsq(Phi, bvec, rcond=None)
+        if rank == Phi.shape[1]:
+            break
+        # Try to shrink remaining extras if any (prefer S extras, then R)
+        shrunk = False
+        if degS_eff > degS_rec and nS_unknowns > 1:
+            degS_eff -= 1
+            degS_hat = max(0, degS_eff - (1 if integrator else 0))
+            nS_unknowns = degS_hat + 1
+            MA = build_conv_matrix(base_A, out_len=len(Acl_eff), shift=0, cols=nS_unknowns)
+            Phi = np.block([MA, MB])
+            shrunk = True
+        elif degR_eff > degR_rec and nR_unknowns > 1:
+            degR_eff -= 1
+            nR_unknowns = degR_eff + 1
+            MB = build_conv_matrix(B, out_len=len(Acl_eff), shift=d, cols=nR_unknowns)
+            Phi = np.block([MA, MB])
+            shrunk = True
+        if not shrunk:
+            # Pseudoinverse fallback to avoid hard failure
+            x = np.linalg.pinv(Phi) @ bvec
+            rank = Phi.shape[1]
+            break
+
+    S_hat = x[:nS_unknowns]
+    R_eff = x[nS_unknowns:]
+    S_eff = poly_conv(S_fac, S_hat)
+
+    # Pad with zeros to match the *requested* target degrees.
+    if len(S_eff) < (degS_tar + 1):
+        S_eff = np.pad(S_eff, (0, degS_tar + 1 - len(S_eff)))
+    if len(R_eff) < (degR_tar + 1):
+        R_eff = np.pad(R_eff, (0, degR_tar + 1 - len(R_eff)))
+
+    S_eff = np.real_if_close(S_eff, tol=1e-9).astype(float)
+    R_eff = np.real_if_close(R_eff, tol=1e-9).astype(float)
+    return S_eff, R_eff
+
+
+# ========================= T-selection (with integrator) ======================
+
+def choose_T(mode: str,
+             B: np.ndarray,
+             Acl: np.ndarray,
+             Ac: Optional[np.ndarray],
+             Ao: Optional[np.ndarray],
+             T_manual: Optional[np.ndarray],
+             integrator: bool,
+             R: np.ndarray) -> np.ndarray:
+    """Select T(q) with correct unity-DC handling and integrator logic.
+
+    unity_dc:
+      - no integrator → T = [A_cl(1)/B(1)]
+      - with integrator → T = [R(1)] (to enforce step tracking)
+    ac:
+      - use Ac if provided; else derive Ac := Acl/Ao when possible
+      - no integrator → K = A_cl(1) / (B(1)·Ac(1)), T = K·Ac
+      - with integrator → scale so (K·Ac)(1) = R(1)
+    manual: return given T.
+    """
+    mode = mode.lower()
+    B1 = eval_poly_at_one(B)
+    Acl1 = eval_poly_at_one(Acl)
+    R1 = eval_poly_at_one(R)
+
+    if mode == 'unity_dc':
+        if integrator:
+            return np.array([R1], dtype=float)
+        if abs(B1) < 1e-12:
+            return np.array([1.0], dtype=float)
+        KT = Acl1 / B1
+        return np.array([KT], dtype=float)
+
+    if mode == 'ac':
+        Ac_use = Ac
+        if Ac_use is None and Ao is not None:
+            q, r = deconv_poly_asc(Acl, Ao)
+            if np.linalg.norm(r) < 1e-8:
+                Ac_use = q
+        if Ac_use is None:
+            raise ValueError("T mode 'ac' requires Ac(q), or Acl/Ao so Ac can be derived.")
+        Ac1 = eval_poly_at_one(Ac_use)
+        if integrator:
+            if abs(Ac1) < 1e-12:
+                K = 1.0
+            else:
+                K = R1 / Ac1
+        else:
+            denom = B1 * Ac1
+            K = 1.0 if abs(denom) < 1e-12 else (Acl1 / denom)
+        return (K * Ac_use).astype(float)
+
+    if mode == 'manual':
+        if T_manual is None:
+            raise ValueError("T mode 'manual' requires --T coefficients.")
+        return np.array(T_manual, dtype=float)
+
+    raise ValueError("Unknown T mode. Use 'unity_dc', 'ac', or 'manual'.")
+
+
+# ================================= Simulation =================================
+@dataclass
+class SimResult:
+    t: np.ndarray
+    r: np.ndarray
+    y: np.ndarray
+    u: np.ndarray
+    v: np.ndarray
+
+
+def simulate_closed_loop(A: np.ndarray, B: np.ndarray, d: int,
+                          R: np.ndarray, S: np.ndarray, Tq: np.ndarray,
+                          N: int = 200, r_step: float = 1.0,
+                          v_step: float = 0.0, v_k0: int = 0,
+                          noise_sigma: float = 0.0,
+                          seed: Optional[int] = 0) -> SimResult:
+    """Closed-loop simulation with **causal scheduling**.
+
+    d ≥ 1: update y[k] first using u[k-d], then compute u[k] from current y[k].
+    d = 0: solve 2×2 algebraic loop for (u[k], y[k]).
+    """
+    rng = np.random.default_rng(seed)
+
+    # Normalize A to monic
+    if abs(A[0] - 1.0) > 1e-12:
+        B = B / A[0]
+        A = A / A[0]
+
+    na = len(A) - 1
+    nb = len(B) - 1
+    mS = len(S) - 1
+    mR = len(R) - 1
+    mT = len(Tq) - 1
+
+    y = np.zeros(N)
+    u = np.zeros(N)
+    r = np.zeros(N)
+    v = np.zeros(N)
+
+    r[:] = r_step
+    if v_step != 0.0 and 0 <= v_k0 < N:
+        v[v_k0:] = v_step
+
+    def get(arr: np.ndarray, k: int) -> float:
+        return 0.0 if k < 0 else arr[k]
+
+    for k in range(N):
+        noise = rng.normal(0.0, noise_sigma) if noise_sigma > 0 else 0.0
+
+        if d >= 1:
+            # Plant update first (uses u up to k-d)
+            Bu = 0.0
+            for j in range(0, nb + 1):
+                Bu += B[j] * get(u, k - d - j)
+            Ay = 0.0
+            for i in range(1, na + 1):
+                Ay += A[i] * get(y, k - i)
+            y[k] = Bu + v[k] + noise - Ay
+
+            # Controller uses current y[k]
+            Su = 0.0
+            for i in range(1, mS + 1):
+                Su += S[i] * get(u, k - i)
+            Tr = 0.0
+            for i in range(0, mT + 1):
+                Tr += Tq[i] * get(r, k - i)
+            Ry = 0.0
+            for i in range(0, mR + 1):
+                Ry += R[i] * get(y, k - i)
+            u[k] = (Tr - Ry - Su) / S[0]
+
+        else:  # d == 0 → algebraic loop between u[k] and y[k]
+            # Prepare history sums
+            Su_hist = 0.0
+            for i in range(1, mS + 1):
+                Su_hist += S[i] * get(u, k - i)
+            Tr = 0.0
+            for i in range(0, mT + 1):
+                Tr += Tq[i] * get(r, k - i)
+            Ry_hist = 0.0
+            for i in range(1, mR + 1):
+                Ry_hist += R[i] * get(y, k - i)
+            c1 = Tr - Su_hist - Ry_hist  # S0*u + R0*y
+
+            Ay_hist = 0.0
+            for i in range(1, na + 1):
+                Ay_hist += A[i] * get(y, k - i)
+            Bu_hist = 0.0
+            for j in range(1, nb + 1):
+                Bu_hist += B[j] * get(u, k - j)
+            c2 = -Ay_hist + Bu_hist + v[k] + noise  # y - B0*u
+
+            S0 = S[0]
+            R0 = R[0] if mR >= 0 else 0.0
+            B0 = B[0] if nb >= 0 else 0.0
+
+            # Solve [[S0, R0], [-B0, 1]] [u, y] = [c1, c2]
+            det = S0*1.0 + B0*R0
+            if abs(det) < 1e-12:
+                det = det + 1e-9
+            u[k] = (c1*1.0 - R0*c2) / det
+            y[k] = (S0*c2 + B0*c1) / det
+
+    t = np.arange(N)
+    return SimResult(t=t, r=r, y=y, u=u, v=v)
+
+
+# ================================ I/O helpers =================================
+
+def save_csv(sim: SimResult, path: str) -> None:
+    import csv
+    with open(path, 'w', newline='') as f:
+        w = csv.writer(f)
+        w.writerow(["k", "r", "y", "u", "v"])
+        for k in range(len(sim.t)):
+            w.writerow([int(sim.t[k]), float(sim.r[k]), float(sim.y[k]), float(sim.u[k]), float(sim.v[k])])
+
+
+def save_json_design(path: str, payload: dict) -> None:
+    with open(path, 'w') as f:
+        json.dump(payload, f, indent=2)
+
+
+def diff_eq_strings(R: np.ndarray, S: np.ndarray, Tq: np.ndarray) -> Tuple[str, str]:
+    def poly_rhs_str(name: str, p: np.ndarray) -> str:
+        terms = []
+        for i, c in enumerate(p):
+            if abs(c) < 1e-14:
+                continue
+            if i == 0:
+                terms.append(f"{c:.6g} {name}[k]")
+            else:
+                terms.append(f"{c:.6g} {name}[k-{i}]")
+        return ' + '.join(terms) if terms else '0'
+
+    left = poly_rhs_str('u', S)
+    right_T = poly_rhs_str('r', Tq)
+    right_R = poly_rhs_str('y', R)
+
+    ctrl_eq = f"{left} = ({right_T}) - ({right_R})"
+
+    # Explicit u[k]
+    num_terms = []
+    if len(Tq) > 0:
+        for i, c in enumerate(Tq):
+            if abs(c) >= 1e-14:
+                idx = '' if i == 0 else f"-{i}"
+                num_terms.append(f"{c:.6g} r[k{idx}]")
+    if len(R) > 0:
+        for i, c in enumerate(R):
+            if abs(c) >= 1e-14:
+                idx = '' if i == 0 else f"-{i}"
+                num_terms.append(f"{-c:.6g} y[k{idx}]")
+    if len(S) > 1:
+        for i, c in enumerate(S[1:], start=1):
+            if abs(c) >= 1e-14:
+                num_terms.append(f"{-c:.6g} u[k-{i}]")
+    denom = S[0]
+    ueq = "u[k] = (" + ' + '.join(num_terms) + f") / {denom:.6g}"
+
+    return ctrl_eq, ueq
+
+
+# ================================ Main CLI ====================================
+
+def main():
+    p = argparse.ArgumentParser(
+        description=(
+            "RST digital control design & simulation (q = z^{-1}).\n"
+            "Outputs forced to out/; JSON specs loaded from in/ by default."
+        ),
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    # ---- Plant ----
+    p.add_argument('--A', help='A(q) coefficients (q = z^{-1}), e.g. "1 -0.8"')
+    p.add_argument('--B', help='B(q) coefficients, e.g. "0.5"')
+    p.add_argument('--d', type=int, default=None, help='Input delay (integer ≥ 0)')
+    p.add_argument('--Ts', type=float, default=None, help='Sampling period for s→z mapping')
+
+    # ---- Target closed-loop ----
+    g = p.add_mutually_exclusive_group(required=False)
+    g.add_argument('--Acl', help='Target A_cl(q) coefficients directly')
+    g.add_argument('--poles', help='Target z-plane poles (space/comma separated)')
+    g.add_argument('--spoles', help='Target s-plane poles; mapped with z=exp(s*Ts)')
+
+    # Optional Ac/Ao factorization
+    p.add_argument('--Ac', help='Ac(q) coefficients (dominant command dynamics)')
+    p.add_argument('--Ao', help='Ao(q) coefficients (noise/observer extra poles)')
+
+    # Degrees & integrator
+    p.add_argument('--degS', type=int, help='Degree of S(q) (overrides auto)')
+    p.add_argument('--degR', type=int, help='Degree of R(q) (overrides auto)')
+    p.add_argument('--alloc', choices=['S','R'], default='S', help='Where to allocate extra degree (beyond minimal): S or R')
+    p.add_argument('--integrator', action='store_true', help='Include (1 - q) factor in S-path')
+
+    # Prefilter T
+    p.add_argument('--Tmode', default=None, choices=['unity_dc', 'ac', 'manual'], help='T(q) selection mode')
+    p.add_argument('--T', help='Manual T(q) coefficients if --Tmode manual')
+
+    # Simulation
+    p.add_argument('--step', type=int, default=None, help='Sim length N (samples) for step test')
+    p.add_argument('--r_step', type=float, default=None, help='Reference step amplitude')
+    p.add_argument('--v_step', type=float, default=None, help='Output disturbance step amplitude')
+    p.add_argument('--v_k0', type=int, default=None, help='Disturbance step start index k0')
+    p.add_argument('--noise', type=float, default=None, help='Measurement noise sigma')
+
+    # I/O files
+    p.add_argument('--in_json', help='Load spec from a JSON file (looked up under in/ by default)')
+    p.add_argument('--save_csv', nargs='?', const='rst.csv', help='Save CSV of (k,r,y,u,v) to out/<name>')
+    p.add_argument('--export_json', nargs='?', const='rst_design.json', help='Export design pack JSON to out/<name>')
+
+    # Pretty
+    p.add_argument('--pretty', action='store_true', help='Pretty print polynomials and difference equations')
+
+    args = p.parse_args()
+
+    # ---- Defaults for sim if not provided ----
+    defd = dict(step=200, r_step=1.0, v_step=0.0, v_k0=0, noise=0.0, Ts=1.0,
+                Tmode='unity_dc', integrator=False, alloc=args.alloc)
+
+    # ---- Possibly load JSON spec from in/ ----
+    from_file = {}
+    if args.in_json:
+        in_path = resolve_in_path(args.in_json)
+        if not os.path.exists(in_path):
+            raise FileNotFoundError(f"Input JSON not found: {in_path}")
+        with open(in_path, 'r') as f:
+            from_file = json.load(f)
+
+    # Helper: pick value by priority CLI > JSON > default
+    def pick(*keys, default=None):
+        cli = None
+        if len(keys) == 1:
+            cli = getattr(args, keys[0], None)
+        cur = from_file
+        for k in keys:
+            if isinstance(cur, dict) and k in cur:
+                cur = cur[k]
+            else:
+                cur = None
+                break
+        return (cli if cli is not None else (cur if cur is not None else default))
+
+    # ---- Gather plant ----
+    A = parse_coeffs(pick('A'))
+    B = parse_coeffs(pick('B'))
+    d = pick('d', default=0)
+    Ts = pick('Ts', default=defd['Ts'])
+
+    if A is None:
+        A = as_array(pick('plant', 'A'))
+    if B is None:
+        B = as_array(pick('plant', 'B'))
+    if d is None:
+        d = pick('plant', 'd', default=0)
+    if Ts is None:
+        Ts = pick('notes', 'Ts', default=defd['Ts'])
+
+    if A is None or B is None:
+        raise ValueError("Plant A and B must be provided via CLI or in/in_json.")
+    d = int(d)
+    Ts = float(Ts)
+
+    # Fold leading B zeros into delay d
+    lead_zeros = 0
+    for coeff in B:
+        if abs(coeff) < 1e-14:
+            lead_zeros += 1
+        else:
+            break
+    if lead_zeros > 0:
+        d += lead_zeros
+        B = B[lead_zeros:]
+        if len(B) == 0:
+            raise ValueError("B(q) cannot be all zeros after removing implicit delay.")
+
+    # ---- Target A_cl ----
+    Ac = parse_coeffs(args.Ac) if args.Ac else as_array(pick('target', 'Ac'))
+    Ao = parse_coeffs(args.Ao) if args.Ao else as_array(pick('target', 'Ao'))
+
+    if args.Acl:
+        Acl = parse_coeffs(args.Acl)
+    else:
+        base_Acl = poly_from_q_factors(Ac, Ao)
+        if args.poles:
+            zp = parse_complex_list(args.poles)
+            Acl_p = poly_from_z_poles(zp)
+            Acl = Acl_p if base_Acl is None else poly_conv(base_Acl, Acl_p)
+        elif args.spoles:
+            sp = parse_complex_list(args.spoles)
+            z_roots = [complex(np.exp(s * Ts)) for s in sp]
+            Acl_p = poly_from_z_poles(z_roots)
+            Acl = Acl_p if base_Acl is None else poly_conv(base_Acl, Acl_p)
+        else:
+            Acl_json = as_array(pick('target', 'Acl'))
+            if Acl_json is not None:
+                Acl = Acl_json
+            elif base_Acl is not None:
+                Acl = base_Acl
+            else:
+                raise ValueError("Provide --Acl, --poles, --spoles, or Ac/Ao/JSON to define A_cl(q).")
+
+    # ---- Degrees & integrator ----
+    degS_cli = args.degS if args.degS is not None else pick('controller', 'degS')
+    degR_cli = args.degR if args.degR is not None else pick('controller', 'degR')
+    alloc = args.alloc if args.alloc is not None else pick('controller', 'alloc', default=defd['alloc'])
+    integrator = bool(args.integrator or pick('controller', 'integrator', default=defd['integrator']))
+
+    # ---- Solve Diophantine ----
+    S, R = diophantine_solve(A, B, d, Acl, degS=degS_cli, degR=degR_cli, integrator=integrator, alloc=alloc)
+
+    # ---- Choose T ----
+    Tmode = args.Tmode if args.Tmode is not None else pick('controller', 'Tmode', default=defd['Tmode'])
+    T_manual = parse_coeffs(args.T) if (Tmode == 'manual' and args.T) else as_array(pick('controller', 'T'))
+    Tq = choose_T(Tmode, B, Acl, Ac, Ao, T_manual, integrator, R)
+
+    # ---- Pretty print ----
+    if args.pretty:
+        print("\n== Plant ==")
+        print(f"A(q) = {poly_to_str(A)}")
+        print(f"B(q) = {poly_to_str(B)}")
+        print(f"Delay d = {d}")
+
+        print("\n== Target ==")
+        print(f"A_cl(q) = {poly_to_str(Acl)}")
+
+        print("\n== Controller (RST) ==")
+        print(f"S(q) = {poly_to_str(S)}")
+        print(f"R(q) = {poly_to_str(R)}")
+        print(f"T(q) = {poly_to_str(Tq)}  [mode={Tmode}, alloc={alloc}]\n")
+
+        ceq, ueq = diff_eq_strings(R, S, Tq)
+        print("-- Control law --")
+        print(ceq)
+        print(ueq)
+
+        # Verify achieved Acl
+        Ach = poly_add(poly_conv(A, S), poly_shift(poly_conv(B, R), d))
+        print("\nAchieved A_cl(q) =", poly_to_str(Ach))
+
+        # Closed-loop poles (z)
+        roots = np.roots(Acl)
+        print("\nClosed-loop poles (z):")
+        if len(roots) > 0:
+            for r_ in roots:
+                print(f"  {r_.real:+.6f}{r_.imag:+.6f}j  |z|={abs(r_):.6f}")
+            print(f"All inside unit circle? {'YES' if stable_all(roots) else 'NO'}")
+        else:
+            print("  (no finite roots)")
+
+    # ---- Simulation params ----
+    N = int(pick('step', default=pick('simulation', 'N', default=defd['step'])))
+    r_step = float(pick('r_step', default=pick('simulation', 'r_step', default=defd['r_step'])))
+    v_step = float(pick('v_step', default=pick('simulation', 'v_step', default=defd['v_step'])))
+    v_k0 = int(pick('v_k0', default=pick('simulation', 'v_k0', default=defd['v_k0'])))
+    noise_sigma = float(pick('noise', default=pick('simulation', 'noise_sigma', default=defd['noise'])))
+
+    # ---- Simulate step response ----
+    sim = simulate_closed_loop(A, B, d, R, S, Tq,
+                               N=N, r_step=r_step,
+                               v_step=v_step, v_k0=v_k0,
+                               noise_sigma=noise_sigma)
+
+    if args.pretty:
+        e = sim.r - sim.y
+        sse = float(abs(e[-1]))
+        print("\n== Simulation (step) ==")
+        print(f"N={N}, r_step={r_step}, v_step={v_step} @ k0={v_k0}, noise_sigma={noise_sigma}")
+        print(f"Final y[N-1] = {sim.y[-1]:.6g}, u[N-1] = {sim.u[-1]:.6g}, SSE = {sse:.6g}")
+
+    # ---- Outputs (forced to out/) ----
+    csv_path = ensure_out_path(args.save_csv, default_basename='rst.csv') if (args.save_csv is not None) else None
+    if csv_path:
+        save_csv(sim, csv_path)
+        if args.pretty:
+            print(f"Saved CSV: {csv_path}")
+
+    json_path = ensure_out_path(args.export_json, default_basename='rst_design.json') if (args.export_json is not None) else None
+    if json_path:
+        payload = {
+            'plant': {
+                'A': A.tolist(), 'B': B.tolist(), 'd': d
+            },
+            'target': {
+                'Acl': Acl.tolist(),
+                'Ac': (Ac.tolist() if Ac is not None else None),
+                'Ao': (Ao.tolist() if Ao is not None else None)
+            },
+            'controller': {
+                'R': R.tolist(), 'S': S.tolist(), 'T': Tq.tolist(),
+                'Tmode': Tmode, 'integrator': integrator,
+                'degS': (int(degS_cli) if degS_cli is not None else None),
+                'degR': (int(degR_cli) if degR_cli is not None else None),
+                'alloc': alloc
+            },
+            'simulation': {
+                'N': N, 'r_step': r_step,
+                'v_step': v_step, 'v_k0': v_k0, 'noise_sigma': noise_sigma
+            },
+            'notes': {
+                'Ts': Ts
+            }
+        }
+        save_json_design(json_path, payload)
+        if args.pretty:
+            print(f"Exported JSON design: {json_path}")
+
+
+if __name__ == '__main__':
+    main()
+
+here are the run commands:
+
+Quick run commands (same UX; now correct behavior)
+	• Unity step tracking (two poles at 0.6):
+
+python rst.py --A "1 -0.8" --B "0.5" --d 1 \
+  --poles "0.6 0.6" \
+  --Tmode unity_dc --pretty \
+  --step 120 --save_csv --export_json
+
+	• Ac-shaped prefilter (Ac·Ao = Acl):
+
+python rst.py --A "1 -0.8" --B "0.5" --d 1 \
+  --Ac "1 -1.2 0.36" --Ao "1" \
+  --Tmode ac --pretty --export_json ac_design.json
+
+	• Integrator + extra pole (unity tracking via T(1)=R(1)):
+
+python rst.py --A "1 -0.8" --B "0.5" --d 1 \
+  --poles "0.6 0.6 0.3" --integrator \
+  --Tmode unity_dc --pretty \
+  --step 200 --save_csv rst_int.csv
+
+	• s-plane poles, derive Ac from Acl/Ao automatically:
+
+python rst.py --A "1 -0.8" --B "0.5" --d 1 --Ts 0.1 \
+  --spoles "-3+4j -3-4j" --Ao "1 -0.4" \
+  --Tmode ac --pretty --export_json s_map.json
+
+	• Direct Acl:
+
+python rst.py --A "1 -0.8" --B "0.5" --d 1 \
+  --Acl "1 -1.2 0.36" \
+  --pretty --export_json acl_direct.json
+
+	• Manual degree override (valid square combo example):
+
+python rst.py --A "1 -0.8" --B "0.5" --d 1 \
+  --poles "0.6 0.6" \
+  --degS 1 --degR 0 --pretty
+
+It so happens that we want to refactor this working script into an object-oriented python module within our new digitalControl app, within the rstControllers package.
+
+the digitalControl app is organized into several packages:
+
+frequencyResponse
+intro
+kalmanFilters
+polePlacement
+polynomialEquations
+quadraticOptimal
+rootLocus
+rstControllers
+stateSpace
+zPlaneAnalysis
+zTransform
+
+each of the modules corresponds to a chapter in Ogata's book Discrete Time Control Systems.
+it so happens that the single script approach is not good architecture. Management asked us to develop a sound architected, object-oriented, test driven modules for each of the topics in the book.
+
+the topic at hand is rst controllers. so we created the rstTool package within the rstControllers package within the digitalControl project.
+
+root
+    package1
+    package2
+    .
+    .
+    .
+    rstControllers
+        rstTool
+            in
+            out
+            tools
+            tests
+                test_1
+                test_2
+            script_1
+            script_2
+            script_3
+        .
+        .
+        .
+        toolOne
+        toolTwo
+            .
+            .
+            .
+
+where script_1, script_2, script_3 represent the meat and potatoes of the rstTool refactored package.
+Basically we are breaking up rst.py into several scripts, by separation of concerns following a strict object-oriented approach with test driven development in mind.
+The code must be absolutely testable.
+The code must be scalable. For example, if we want to implement more options or flags.
+
+for the rst controllers tool package, any input files would be stored in rstControllers/rstTool/in
+for the rst controllers tool package, any output files would be stored in rstControllers/rstTool/out
+
+use decorators as applicable.
+
+tests will be stored in rstControllers/rstTool/tests
+
+any tools will be stored in rstControllers/rstTool/tools
+
+So we are going to build a beautiful architecture, with crisp classes and methods and all the goodies that come with oop approach.
+The proposed architecture for the rstTool package would be something like this:
+
+    app.py
+    apis.py
+    cli.py
+    core.py
+    design.py
+    io.py
+    utils.py
+    tools
+        tool_1.py
+        tool_2.py
+    tests
+        test_1.py
+        test_2.py
+        .
+        .
+        .
+
+the cli.py script absolutely must include the import trick we found in other tools so that commands work from within the package.
+
+shows the trick we found in kalmanFilterTool/cli.py:
+
+# ---------- Import shim so `python cli.py` works with absolute imports ----------
+if __package__ in (None, ""):
+    # Running as a script: add project root to sys.path and import absolute modules
+    import os, sys
+    pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    if pkg_root not in sys.path:
+        sys.path.insert(0, pkg_root)
+    from kalmanFilters.kalmanFilterTool.apis import RunRequest
+    from kalmanFilters.kalmanFilterTool.app import KalmanFilterApp
+    from kalmanFilters.kalmanFilterTool.io import parse_matrix, parse_vector
+else:
+    # Normal package execution
+    from .apis import RunRequest
+    from .app import KalmanFilterApp
+    from .io import parse_matrix, parse_vector
+
+We found that for our robotics project, the hurwitzTool, the icTool, the routhTool, responseTool, compensatorTool, rstTool, systemResponseTool, experimentTool, plotTool, bodeTool, pidTool, zeroPoleTool packages this approach worked well.
+If you find redundancies and would like to streamline that is ok. The important thing is that we break this up for easy understanding, testing, debugging and scalability.
+keep in mind that we will implement TDD with pytest. So the classes and methods should be testable.
+
+Also, when the app is done we want to generate a class diagram. So keep in mind which libraries we can leverage to create a sparkling, cute class diagram.
+Also, if the classes need documentation, let's do that. Perhaps later we can implement a sphinx project to generate the documentation.
+
+So, please go ahead and build this glorious, architecture sound, god tier, kick-ass app to meet the project requirements and tackle rst controllers per the working code and latest facts.
+
+please generate a zip file with all the scripts.
+
+///
+
+///
+
+///
+
+this is messed up:
+
+(.venv) ➜  digitalControl git:(develop) ✗ pytest rstControllers/rstTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=rstControllers/rstTool/.coveragerc \
+  --cov-report=term-missing
+ERROR: usage: pytest [options] [file_or_dir] [file_or_dir] [...]
+pytest: error: unrecognized arguments: --cov --cov-config=rstControllers/rstTool/.coveragerc --cov-report=term-missing
+  inifile: /Users/pablomontijo/Control/digitalControl/pytest.ini
+  rootdir: /Users/pablomontijo/Control/digitalControl
+
+(.venv) ➜  digitalControl git:(develop) ✗
+
+here is pytest.ini in the root of the project:
+
+# pytest.ini (repo root)
+[pytest]
+# Where to look for tests
+testpaths =
+    kalmanFilters/kalmanFilterTool/tests
+    rstControllers/rstTool/tests
+    rstControllers/rstPlotTool/tests
+
+# Default options:
+# -vv : very verbose test names
+# -ra : show summary of skips/xfails
+# --durations=10 : slowest 10 tests
+# pytest.ini
+addopts =
+    -vv
+    -ra
+    --durations=10
+    --color=yes
+    --cov=frequencyResponse
+    --cov=intro
+    --cov=kalmanFilters
+    --cov=polePlacement
+    --cov=polynomialEquations
+    --cov=quadraticOptimal
+    --cov=rootLocus
+    --cov=rstControllers
+    --cov=stateSpace
+    --cov=zPlaneAnalysis
+    --cov=zTransform
+    --cov-report=term-missing
+    -o console_output_style=classic
+    -o faulthandler_timeout=60
+
+
+# Live logging to console (use logging.* in tests)
+log_cli = true
+log_cli_level = INFO
+log_cli_format = %(asctime)s [%(levelname)s] %(name)s: %(message)s
+log_cli_date_format = %H:%M:%S
+
+# Make xfail strict so accidental passes are flagged
+xfail_strict = true
+
+# Register custom markers
+markers =
+    cf: closed-form / symbolic tests
+    symbolic: tests requiring SymPy
+    slow: slow-running tests
+    batch: batch job tests
+
+# Tame 3rd-party deprecation noise but keep our own strict
+filterwarnings =
+    error::DeprecationWarning:transientAnalysis\..*
+    error::DeprecationWarning:rootLocus\..*
+    ignore::DeprecationWarning
+
+here is pyproject.toml:
+
+# pyproject.toml
+[project]
+name = "digitalControl"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = ["numpy", "scipy", "sympy", "pyyaml"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-xdist", "pytest-cov"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Root layout; find packages automatically
+# IMPORTANT: add __init__.py in each package directory you want importable
+# (e.g., rotation/__init__.py, orientation/__init__.py, ...)
+[tool.setuptools.packages.find]
+where = ["."]
+# Strict include list—only these top-level dirs will be treated as packages
+include = [
+  "frequencyResponse",
+  "intro",
+  "kalmanFilters",
+  "polePlacement",
+  "polynomialEquations",
+  "quadraticOptimal",
+  "rootLocus",
+  "rstControllers",
+  "stateSpace",
+  "zPlaneAnalysis",
+  "zTransform",
+]
+exclude = ["**/tests*", "**/__pycache__*"]
+
+# Keep pytest config in pytest.ini to avoid duplication.
+
+I am not sure the project structure is understood.
+
+///
+
+///
+
+///
+
+ok, it was a library installation issue.
+
+coverage is at 51%:
+
+(.venv) ➜  digitalControl git:(develop) ✗ pytest rstControllers/rstTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=rstControllers/rstTool/.coveragerc \
+  --cov-report=term-missing
+Test session starts (platform: darwin, Python 3.13.5, pytest 8.4.2, pytest-sugar 1.1.1)
+rootdir: /Users/pablomontijo/Control/digitalControl
+configfile: pytest.ini
+plugins: xdist-3.8.0, timeout-2.4.0, anyio-4.10.0, sugar-1.1.1, cov-7.0.0
+collected 2 items
+
+ rstControllers/rstTool/tests/test_smoke.py::test_smoke_unity_dc ✓                                                                                       50% █████
+ rstControllers/rstTool/tests/test_smoke.py::test_integrator_unity ✓                                                                                    100% ██████████
+=========================================================================== tests coverage ============================================================================
+__________________________________________________________ coverage: platform darwin, python 3.13.5-final-0 ___________________________________________________________
+
+Name                                            Stmts   Miss Branch BrPart  Cover   Missing
+-------------------------------------------------------------------------------------------
+rstControllers/rstTool/__init__.py                  0      0      0      0   100%
+rstControllers/rstTool/apis.py                     34      0      0      0   100%
+rstControllers/rstTool/app.py                      57     10     20      6    69%   16->exit, 18->21, 19->18, 22-23, 27, 32-39
+rstControllers/rstTool/cli.py                      38     38      4      0     0%   4-58
+rstControllers/rstTool/core.py                     87     26     46      9    60%   7->exit, 9, 10->exit, 17-19, 22-30, 31->exit, 38, 56->exit, 72-78, 83->92, 86-91
+rstControllers/rstTool/design.py                   93     53     42      3    36%   19->exit, 21-35, 58-69, 73-79, 82-101
+rstControllers/rstTool/io.py                       32     11     14      3    52%   8-11, 14-15, 19, 22-25, 28->exit, 34->exit
+rstControllers/rstTool/tests/__init__.py            0      0      0      0   100%
+rstControllers/rstTool/tests/test_smoke.py         14      0      0      0   100%
+rstControllers/rstTool/tools/__init__.py            0      0      0      0   100%
+rstControllers/rstTool/tools/class_diagram.py       9      9      0      0     0%   2-29
+rstControllers/rstTool/utils.py                    23     11      6      0    41%   16-20, 23-28
+-------------------------------------------------------------------------------------------
+TOTAL                                             387    158    132     21    51%
+
+Results (6.92s):
+       2 passed
+(.venv) ➜  digitalControl git:(develop) ✗
+
+please generate a new zip file to include a collection of test scripts to jack up coverage.
+
+///
+
+///
+
+///
+
+ok the RUNS.md is messed up:
+
+
+# rstControllers/rstTool — RST Controller (OOP)
+
+Run from repo root:
+```bash
+python -m rstControllers.rstTool.cli --help
+# or
+python rstControllers/rstTool/cli.py --help
+```
+
+## Quick runs (outputs in `rstControllers/rstTool/out/`)
+Unity step:
+```bash
+python -m rstControllers.rstTool.cli --A "1 -0.8" --B "0.5" --d 1 --poles "0.6 0.6" --Tmode unity_dc --pretty --step 120 --save_csv --export_json
+```
+Ac-shaped prefilter:
+```bash
+python -m rstControllers.rstTool.cli --A "1 -0.8" --B "0.5" --d 1 --Ac "1 -1.2 0.36" --Ao "1" --Tmode ac --pretty --export_json ac_design.json
+```
+Integrator + extra pole:
+```bash
+python -m rstControllers.rstTool.cli --A "1 -0.8" --B "0.5" --d 1 --poles "0.6 0.6 0.3" --integrator --Tmode unity_dc --pretty --step 200 --save_csv rst_int.csv
+```
+s-plane poles, derive Ac:
+```bash
+python -m rstControllers.rstTool.cli --A "1 -0.8" --B "0.5" --d 1 --Ts 0.1 --spoles "-3+4j -3-4j" --Ao "1 -0.4" --Tmode ac --pretty --export_json s_map.json
+```
+Direct Acl:
+```bash
+python -m rstControllers.rstTool.cli --A "1 -0.8" --B "0.5" --d 1 --Acl "1 -1.2 0.36" --pretty --export_json acl_direct.json
+```
+Degree override:
+```bash
+python -m rstControllers.rstTool.cli --A "1 -0.8" --B "0.5" --d 1 --poles "0.6 0.6" --degS 1 --degR 0 --pretty
+```
+Class diagram:
+```bash
+python rstControllers/rstTool/tools/class_diagram.py
+```
+
+i need you to create a new zip file with RUNS.md with an exhaustive full list of run commands to run the commands from inside the rstTool package.
+
+///
+
+///
+
+///
+
+this is fucked up. i told you i am running the commands from inside the rstTool package:
+
+python cli.py --help
+(.venv) ➜  rstTool python cli.py --help
+usage: rstControllers.rstTool [-h] --A A --B B [--d D] [--Ts TS] [--Acl ACL | --poles POLES | --spoles SPOLES] [--Ac AC] [--Ao AO] [--degS DEGS] [--degR DEGR]
+                              [--alloc {S,R}] [--integrator] [--Tmode {unity_dc,ac,manual}] [--T T] [--step STEP] [--r_step R_STEP] [--v_step V_STEP]
+                              [--v_k0 V_K0] [--noise NOISE] [--in_json IN_JSON] [--export_json [EXPORT_JSON]] [--save_csv [SAVE_CSV]] [--pretty]
+
+RST design & simulation (q=z^{-1}), outputs → rstControllers/rstTool/out/
+
+options:
+  -h, --help            show this help message and exit
+  --A A
+  --B B
+  --d D
+  --Ts TS
+  --Acl ACL
+  --poles POLES
+  --spoles SPOLES
+  --Ac AC
+  --Ao AO
+  --degS DEGS
+  --degR DEGR
+  --alloc {S,R}
+  --integrator
+  --Tmode {unity_dc,ac,manual}
+  --T T
+  --step STEP
+  --r_step R_STEP
+  --v_step V_STEP
+  --v_k0 V_K0
+  --noise NOISE
+  --in_json IN_JSON
+  --export_json [EXPORT_JSON]
+  --save_csv [SAVE_CSV]
+  --pretty
+(.venv) ➜  rstTool git:(develop) ✗ python cli.py --A "1 -0.8" --B "0.5" --d 1   --poles "0.6 0.6"   --Tmode unity_dc --pretty   --step 120 --save_csv --export_json
+Traceback (most recent call last):
+  File "/Users/pablomontijo/Control/digitalControl/rstControllers/rstTool/cli.py", line 58, in <module>
+    if __name__=="__main__": main()
+                             ~~~~^^
+  File "/Users/pablomontijo/Control/digitalControl/rstControllers/rstTool/cli.py", line 49, in main
+    from .design import poly_to_str, diff_eq_strings
+ImportError: attempted relative import with no known parent package
+(.venv) ➜  rstTool git:(develop) ✗ python cli.py --A "1 -0.8" --B "0.5" --d 1   --poles "0.6 0.6" --Tmode unity_dc   --save_csv my_unity.csv --export_json my_unity.json
+(.venv) ➜  rstTool git:(develop) ✗ # -> out/my_unity.csv, out/my_unity.json
+(.venv) ➜  rstTool git:(develop) ✗ python cli.py --A "1 -0.8" --B "0.5" --d 1   --Ac "1 -1.2 0.36" --Ao "1"   --Tmode ac --pretty --export_json ac_design.json
+Traceback (most recent call last):
+  File "/Users/pablomontijo/Control/digitalControl/rstControllers/rstTool/cli.py", line 58, in <module>
+    if __name__=="__main__": main()
+                             ~~~~^^
+  File "/Users/pablomontijo/Control/digitalControl/rstControllers/rstTool/cli.py", line 49, in main
+    from .design import poly_to_str, diff_eq_strings
+ImportError: attempted relative import with no known parent package
+(.venv) ➜  rstTool git:(develop) ✗ python cli.py --A "1 -0.8" --B "0.5" --d 1   --poles "0.6 0.6" --Ao "1"   --Tmode ac --pretty
+Traceback (most recent call last):
+  File "/Users/pablomontijo/Control/digitalControl/rstControllers/rstTool/cli.py", line 58, in <module>
+    if __name__=="__main__": main()
+                             ~~~~^^
+  File "/Users/pablomontijo/Control/digitalControl/rstControllers/rstTool/cli.py", line 49, in main
+    from .design import poly_to_str, diff_eq_strings
+ImportError: attempted relative import with no known parent package
+(.venv) ➜  rstTool git:(develop) ✗ python cli.py --A "1 -0.8" --B "0.5" --d 1   --poles "0.6 0.6 0.3" --integrator   --Tmode unity_dc --pretty   --step 200 --save_csv rst_int.csv
+Traceback (most recent call last):
+  File "/Users/pablomontijo/Control/digitalControl/rstControllers/rstTool/cli.py", line 58, in <module>
+    if __name__=="__main__": main()
+                             ~~~~^^
+  File "/Users/pablomontijo/Control/digitalControl/rstControllers/rstTool/cli.py", line 49, in main
+    from .design import poly_to_str, diff_eq_strings
+ImportError: attempted relative import with no known parent package
+(.venv) ➜  rstTool git:(develop) ✗
+
+
+here is the current cli.py:
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+import argparse, os, sys
+if __package__ in (None, ""):
+    pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    if pkg_root not in sys.path: sys.path.insert(0, pkg_root)
+    from rstControllers.rstTool.apis import RunRequest
+    from rstControllers.rstTool.app import RSTApp
+    from rstControllers.rstTool.io import parse_coeffs, parse_complex_list
+else:
+    from .apis import RunRequest
+    from .app import RSTApp
+    from .io import parse_coeffs, parse_complex_list
+
+def main():
+    p=argparse.ArgumentParser(prog="rstControllers.rstTool", description="RST design & simulation (q=z^{-1}), outputs → rstControllers/rstTool/out/", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    p.add_argument('--A', required=True); p.add_argument('--B', required=True)
+    p.add_argument('--d', type=int, default=0); p.add_argument('--Ts', type=float, default=1.0)
+    g=p.add_mutually_exclusive_group(required=False)
+    g.add_argument('--Acl'); g.add_argument('--poles'); g.add_argument('--spoles')
+    p.add_argument('--Ac'); p.add_argument('--Ao')
+    p.add_argument('--degS', type=int); p.add_argument('--degR', type=int)
+    p.add_argument('--alloc', choices=['S','R'], default='S'); p.add_argument('--integrator', action='store_true')
+    p.add_argument('--Tmode', choices=['unity_dc','ac','manual'], default='unity_dc'); p.add_argument('--T')
+    p.add_argument('--step', type=int, default=200); p.add_argument('--r_step', type=float, default=1.0)
+    p.add_argument('--v_step', type=float, default=0.0); p.add_argument('--v_k0', type=int, default=0); p.add_argument('--noise', type=float, default=0.0)
+    p.add_argument('--in_json'); p.add_argument('--export_json', nargs='?', const='rst_design.json'); p.add_argument('--save_csv', nargs='?', const='rst.csv')
+    p.add_argument('--pretty', action='store_true')
+    a=p.parse_args()
+    req=RunRequest(
+        A=parse_coeffs(a.A).tolist(), B=parse_coeffs(a.B).tolist(), d=int(a.d), Ts=float(a.Ts),
+        Acl=(parse_coeffs(a.Acl).tolist() if a.Acl else None),
+        poles=(parse_complex_list(a.poles) if a.poles else None),
+        spoles=(parse_complex_list(a.spoles) if a.spoles else None),
+        Ac=(parse_coeffs(a.Ac).tolist() if a.Ac else None),
+        Ao=(parse_coeffs(a.Ao).tolist() if a.Ao else None),
+        degS=(int(a.degS) if a.degS is not None else None),
+        degR=(int(a.degR) if a.degR is not None else None),
+        alloc=a.alloc, integrator=bool(a.integrator),
+        Tmode=a.Tmode, T=(parse_coeffs(a.T).tolist() if (a.Tmode=='manual' and a.T) else None),
+        N=int(a.step), r_step=float(a.r_step), v_step=float(a.v_step), v_k0=int(a.v_k0), noise_sigma=float(a.noise),
+        in_json=a.in_json, export_json=(a.export_json if a.export_json else None), save_csv=(a.save_csv if a.save_csv else None),
+        pretty=bool(a.pretty)
+    )
+    app=RSTApp(); res=app.run(req)
+    if a.pretty:
+        from .design import poly_to_str, diff_eq_strings
+        import numpy as np
+        print("\n== Controller (RST) ==")
+        print(f"S(q) = {poly_to_str(res.S)}"); print(f"R(q) = {poly_to_str(res.R)}"); print(f"T(q) = {poly_to_str(res.Tq)}  [mode={a.Tmode}, alloc={a.alloc}]")
+        ctrl,ueq=diff_eq_strings(np.array(res.R),np.array(res.S),np.array(res.Tq)); print("\n-- Control law --"); print(ctrl); print(ueq)
+        print(f"\nSSE: {res.sse:.6g}, y_final={res.y_final:.6g}, u_final={res.u_final:.6g}")
+        if res.csv_path: print(f"Saved CSV: {res.csv_path}")
+        if res.json_path: print(f"Exported JSON: {res.json_path}")
+
+if __name__=="__main__": main()
+
+so what do we do next?
+
+also, in OhMyZsh, we use the equals trick for run commands.
+
+///
+
+///
+
+///
+
+here is the current cli.py:
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+import argparse, os, sys
+if __package__ in (None, ""):
+    pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    if pkg_root not in sys.path: sys.path.insert(0, pkg_root)
+    from rstControllers.rstTool.apis import RunRequest
+    from rstControllers.rstTool.app import RSTApp
+    from rstControllers.rstTool.io import parse_coeffs, parse_complex_list
+else:
+    from .apis import RunRequest
+    from .app import RSTApp
+    from .io import parse_coeffs, parse_complex_list
+
+def main():
+    p=argparse.ArgumentParser(prog="rstControllers.rstTool", description="RST design & simulation (q=z^{-1}), outputs → rstControllers/rstTool/out/", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    p.add_argument('--A', required=True); p.add_argument('--B', required=True)
+    p.add_argument('--d', type=int, default=0); p.add_argument('--Ts', type=float, default=1.0)
+    g=p.add_mutually_exclusive_group(required=False)
+    g.add_argument('--Acl'); g.add_argument('--poles'); g.add_argument('--spoles')
+    p.add_argument('--Ac'); p.add_argument('--Ao')
+    p.add_argument('--degS', type=int); p.add_argument('--degR', type=int)
+    p.add_argument('--alloc', choices=['S','R'], default='S'); p.add_argument('--integrator', action='store_true')
+    p.add_argument('--Tmode', choices=['unity_dc','ac','manual'], default='unity_dc'); p.add_argument('--T')
+    p.add_argument('--step', type=int, default=200); p.add_argument('--r_step', type=float, default=1.0)
+    p.add_argument('--v_step', type=float, default=0.0); p.add_argument('--v_k0', type=int, default=0); p.add_argument('--noise', type=float, default=0.0)
+    p.add_argument('--in_json'); p.add_argument('--export_json', nargs='?', const='rst_design.json'); p.add_argument('--save_csv', nargs='?', const='rst.csv')
+    p.add_argument('--pretty', action='store_true')
+    a=p.parse_args()
+    req=RunRequest(
+        A=parse_coeffs(a.A).tolist(), B=parse_coeffs(a.B).tolist(), d=int(a.d), Ts=float(a.Ts),
+        Acl=(parse_coeffs(a.Acl).tolist() if a.Acl else None),
+        poles=(parse_complex_list(a.poles) if a.poles else None),
+        spoles=(parse_complex_list(a.spoles) if a.spoles else None),
+        Ac=(parse_coeffs(a.Ac).tolist() if a.Ac else None),
+        Ao=(parse_coeffs(a.Ao).tolist() if a.Ao else None),
+        degS=(int(a.degS) if a.degS is not None else None),
+        degR=(int(a.degR) if a.degR is not None else None),
+        alloc=a.alloc, integrator=bool(a.integrator),
+        Tmode=a.Tmode, T=(parse_coeffs(a.T).tolist() if (a.Tmode=='manual' and a.T) else None),
+        N=int(a.step), r_step=float(a.r_step), v_step=float(a.v_step), v_k0=int(a.v_k0), noise_sigma=float(a.noise),
+        in_json=a.in_json, export_json=(a.export_json if a.export_json else None), save_csv=(a.save_csv if a.save_csv else None),
+        pretty=bool(a.pretty)
+    )
+    app=RSTApp(); res=app.run(req)
+    if a.pretty:
+        from .design import poly_to_str, diff_eq_strings
+        import numpy as np
+        print("\n== Controller (RST) ==")
+        print(f"S(q) = {poly_to_str(res.S)}"); print(f"R(q) = {poly_to_str(res.R)}"); print(f"T(q) = {poly_to_str(res.Tq)}  [mode={a.Tmode}, alloc={a.alloc}]")
+        ctrl,ueq=diff_eq_strings(np.array(res.R),np.array(res.S),np.array(res.Tq)); print("\n-- Control law --"); print(ctrl); print(ueq)
+        print(f"\nSSE: {res.sse:.6g}, y_final={res.y_final:.6g}, u_final={res.u_final:.6g}")
+        if res.csv_path: print(f"Saved CSV: {res.csv_path}")
+        if res.json_path: print(f"Exported JSON: {res.json_path}")
+
+if __name__=="__main__": main()
+
+please generate the entire upgraded cli.py per the latest facts.
+
+///
+
+///
+
+///
+
+this is fucked up:
+
+
+## 1) Minimal unity step-tracking (two poles at 0.6)
+
+```bash
+python cli.py --A "1 -0.8" --B "0.5" --d 1   --poles "0.6 0.6"   --Tmode unity_dc --pretty   --step 120 --save_csv --export_json
+```
+- Writes `out/rst.csv` and `out/rst_design.json`.
+
+it actually wrote to rstControllers/rstTool/rstControllers/rstControllers/rstTool/out
+
+what the fuck???
+
+the project requirement says we should write to rstControllers/rstTool/out
+
+so what the fuck happened?
+
+can we fix the run commands, or is this a codebase issue?
+
+///
+
+///
+
+///
+
+this command is fucked up:
+
+python cli.py --in_json my_spec.json --pretty --export_json json_out.json --save_csv json_out.csv
+(.venv) ➜  rstTool python cli.py --in_json my_spec.json --pretty --export_json json_out.json --save_csv json_out.csv
+usage: rstControllers.rstTool [-h] --A A --B B [--d D] [--Ts TS] [--Acl ACL | --poles POLES | --spoles SPOLES] [--Ac AC] [--Ao AO] [--degS DEGS] [--degR DEGR]
+                              [--alloc {S,R}] [--integrator] [--Tmode {unity_dc,ac,manual}] [--T T] [--step STEP] [--r_step R_STEP] [--v_step V_STEP]
+                              [--v_k0 V_K0] [--noise NOISE] [--in_json IN_JSON] [--export_json [EXPORT_JSON]] [--save_csv [SAVE_CSV]] [--pretty]
+rstControllers.rstTool: error: the following arguments are required: --A, --B
+(.venv) ➜  rstTool git:(develop) ✗
+
+my_spec.json does exist in the in directory.
+
+///
+
+///
+
+///
+

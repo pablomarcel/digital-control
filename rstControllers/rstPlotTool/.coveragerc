@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = rstControllers/rstPlotTool
+
+[html]
+directory = rstControllers/rstPlotTool/out/htmlcov
+
+[report]
+show_missing = True
