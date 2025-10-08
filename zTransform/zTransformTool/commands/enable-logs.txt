@@ -1,0 +1,145 @@
+Good news / bad news:
+
+* **What’s working:** your CLI output shows the fitter *can* land on the right family of solutions for B7 (that last term `0.920673…·0.36787944^k + 1.5819767·k − 0.920673…` is exactly the structure we want: `{e^{-k}, k, 1}` gated at `k≥1`). 19/20 tests still pass, so the overall pipeline is intact.
+* **What’s failing now:** the B7 test’s “closed-form vs seq” diffs are still large. That means in the **test path** the homogeneous-correction solve is picking a compromised least-squares solution instead of the exact one (matrix is nearly singular). Your CLI run shows the “nice” form because the numerical path happened to converge to the good coefficients there.
+* **Did logs work?** Not yet—your pasted output doesn’t include any `ztt.core` lines. You need to enable them explicitly:
+
+  ```bash
+  # one-off test
+  ZTT_LOG=1 ZTT_LOG_MATRICES=1 pytest zTransform/zTransformTool/tests/test_inverse_double_pole.py::test_inverse_double_pole_case_b7 -q
+
+  # or for the CLI
+  ZTT_LOG=1 ZTT_LOG_MATRICES=1 python cli.py --iz --X "z**2/((z-1)**2*(z-exp(-a*T)))" --subs "a=1,T=1" --N 6 --pretty
+  ```
+
+  You’ll see: deg(A), deg(B), delay d, rows, the basis, M and b, the solver it used, the solved C, and post-correction diffs.
+
+---
+
+## Why we still miss B7 in tests
+
+Even after gating row 0 and adding an extra usable row, the **design matrix** for B7 can be ill-conditioned: the columns `{1, k, e^{-k}}` on k=0..5 aren’t orthogonal and two of them are quite correlated for small k. Using `pinv` (and sometimes `LU`) on a borderline matrix can yield a softened fit that doesn’t exactly nail the first 5 usable rows.
+
+**Fix:** try an **exact symbolic solve** for the usable rows first; only fall back to numeric solvers if needed. This makes the fitter deterministic and removes the conditioning wobble that’s clobbering B7 under pytest.
+
+Here’s a **surgical patch** to `_fit_closed_form_to_seq` that:
+
+1. builds the submatrix with only usable rows (k≥d),
+2. tries `linsolve` exactly,
+3. falls back to LU / pinv if necessary,
+4. (tiny tweak) gives one more row to keep the system comfortably overdetermined.
+
+Replace the middle of `_fit_closed_form_to_seq` with this block (keep your logging; I reference it):
+
+```python
+    # Delay from B(u)
+    d = max(_poly_min_exp_u(B), 0)
+
+    # rows: include B’s degree span AND the gate loss 'd', +2 extra rows for stability
+    rows = min(len(seq), n + max(B.degree(), 0) + d + 2)
+    # guarantee enough usable rows: (rows - d) >= n
+    if (rows - d) < n:
+        rows = min(len(seq), d + n)
+
+    if _LOG.isEnabledFor(logging.DEBUG):
+        _LOG.debug("_fit_closed_form_to_seq:")
+        _LOG.debug("  deg(A)=%d, deg(B)=%d, delay d=%d, rows=%d", A.degree(), B.degree(), d, rows)
+        _LOG.debug("  basis_terms (len=%d)=%s", len(basis_terms), basis_terms)
+
+    # Build system on k=0..rows-1; evaluate basis at (k-d) and DO NOT constrain gated rows
+    M = sp.zeros(rows, len(basis_terms))
+    b = sp.zeros(rows, 1)
+    usable = []  # collect indices with kval >= 0
+    for rix in range(rows):
+        xr = sp.simplify(xk_closed.subs({k_sym: rix}))
+        kval = rix - d
+        if kval < 0:
+            b[rix, 0] = sp.Integer(0)
+            continue
+        usable.append(rix)
+        br = sp.simplify(seq[rix] - xr)
+        b[rix, 0] = br
+        for cix, term in enumerate(basis_terms):
+            M[rix, cix] = sp.simplify(term.subs({k_sym: kval}))
+
+    # Reduce to usable sub-system (eliminate the all-zero gated rows)
+    if usable:
+        Mu = sp.Matrix([M[i, :] for i in usable])
+        bu = sp.Matrix([b[i, 0] for i in usable])
+    else:
+        Mu = sp.Matrix(M)
+        bu = sp.Matrix([b[i, 0] for i in range(rows)])
+
+    if _LOG.isEnabledFor(logging.DEBUG):
+        _LOG.debug("  usable rows = %d (k=%d..%d)", len(usable), (usable[0] if usable else 0), (usable[-1] if usable else rows-1))
+        if _DUMP_MATS:
+            _LOG.debug("  Mu=\n%s", Mu)
+            _LOG.debug("  bu=\n%s", bu)
+
+    # Solve for C: prefer exact linsolve on usable rows, then LU, then pinv
+    C = None
+    solved_via = ""
+    try:
+        Cvars = sp.symbols(f"C0:{len(basis_terms)}")
+        # Equations Mu*Cc = bu
+        eqs = [sp.Eq(sum(Mu[i, j] * Cvars[j] for j in range(Mu.shape[1])), bu[i]) for i in range(Mu.shape[0])]
+        sol = sp.linsolve(eqs, Cvars)
+        if sol:
+            sol_tuple = list(sol)[0]
+            C = sp.Matrix([sp.simplify(si) for si in sol_tuple])
+            solved_via = "linsolve"
+    except Exception:
+        C = None
+
+    if C is None:
+        try:
+            C = Mu.LUsolve(bu)
+            solved_via = "LUsolve"
+        except Exception:
+            C = Mu.pinv() * bu
+            solved_via = "pinv"
+
+    if _LOG.isEnabledFor(logging.DEBUG):
+        _LOG.debug("  solved via %s; C=%s", solved_via, [sp.simplify(C[i, 0] if C.shape[1]==1 else C[i]) for i in range(C.shape[0])])
+
+    # Build gated correction with solved coefficients
+    corr = sp.Integer(0)
+    H = sp.Heaviside(k_sym - d, 1)
+    for idx, term in enumerate(basis_terms):
+        coeff = C[idx, 0] if (isinstance(C, sp.MatrixBase) and C.shape[1] == 1) else C[idx]
+        corr += sp.simplify(coeff) * term.subs({k_sym: k_sym - d}) * H
+
+    xk_fixed = sp.simplify(_cleanup_heaviside_powers(xk_closed + corr))
+
+    if _LOG.isEnabledFor(logging.DEBUG):
+        diffs = []
+        for rix in range(rows):
+            lhs = sp.N(sp.simplify(xk_fixed.subs({k_sym: rix})))
+            rhs = sp.N(sp.simplify(seq[rix]))
+            diffs.append(float(lhs - rhs))
+        _LOG.debug("  post-correction diffs for k=0..%d: %s", rows - 1, diffs)
+
+    return xk_fixed
+```
+
+### Why this should fix B7
+
+* We solve **exactly** on the k=1..5 usable rows for `{1, k, e^{-k}}`. That pins the homogeneous correction uniquely so it matches the unilateral recurrence samples point-wise.
+* Keeping the gated rows out of the equation system avoids `0·C = nonzero` inconsistencies.
+* Overdetermination (we now typically get 5–6 equations for 3 unknowns) gives `linsolve` enough constraints; if the equations are consistent (they are), you get a clean exact solution; if not, the fallback numeric solves kick in.
+
+---
+
+## Should we “fix the test”?
+
+No—this test is doing the right thing: it checks your final closed form **agrees sample-wise** with the unrolled unilateral recurrence. The fix belongs in the fitter (as above), not in the test.
+
+---
+
+If you apply the patch and re-run with logs:
+
+```bash
+ZTT_LOG=1 ZTT_LOG_MATRICES=1 pytest zTransform/zTransformTool/tests/test_inverse_double_pole.py::test_inverse_double_pole_case_b7 -q
+```
+
+you should see `solved via linsolve` and a post-correction diff vector of all zeros on the fitted window, and the test should pass. If anything still wobbles, paste the `ztt.core` block and I’ll zero in on it.
