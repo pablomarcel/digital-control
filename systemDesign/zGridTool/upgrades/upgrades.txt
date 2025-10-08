@@ -1,0 +1,211 @@
+Not a dumb question at all. Right now our `zGridTool` package only draws the z-grid (plus pole/zero overlays) — no root-locus, Nyquist, or Nichols yet.
+
+### How hard is it to add them?
+
+**Reasonable** effort, not a rewrite. We already have:
+
+* a clean CLI, request/response dataclasses, and an app façade
+* math helpers for z-plane geometry
+* consistent in/out conventions and CSV/JSON overlay parsing
+
+What we need to add is:
+
+* a minimal **LTI model layer** (to represent G(z) from (num, den))
+* routines to compute **closed-loop poles vs K** (root locus)
+* routines to compute **frequency response on the unit circle** (Nyquist/Nichols)
+* plotters for those results (MPL and optional Plotly)
+
+That fits our OOP/TDD style very nicely.
+
+---
+
+## Proposed architecture changes (OOP-friendly)
+
+### New modules
+
+* `models.py`
+
+  * `ZTransferFunction(num: Sequence[float], den: Sequence[float])`
+  * Helpers: `eval_poly(z, coeffs)`, `poly_add`, `poly_mul`, `tf_from_file(...)`
+* `responses.py`
+
+  * `closed_loop_char_poly(G: ZTransferFunction, K: float) -> np.ndarray`
+  * `root_locus_points(G, K_grid: np.ndarray) -> list[np.ndarray]` (each K → roots)
+  * `freq_response(G, w: np.ndarray) -> np.ndarray` with `z = e^{j w}`
+  * `nichols_coords(H: np.ndarray) -> tuple[mag_db, phase_deg]`
+* `rlocus_plot.py`
+
+  * `draw_root_locus_mpl(...)`, `draw_root_locus_plotly(...)`
+* `nyquist_plot.py`
+
+  * `draw_nyquist_mpl(...)`, `draw_nyquist_plotly(...)`
+* `nichols_plot.py`
+
+  * `draw_nichols_mpl(...)`, `draw_nichols_plotly(...)`
+
+*(You suggested `root_locus.py`, `nyquist.py`, `nichols.py` — totally fine; I split plotting into `*_plot.py` to keep math separate in `responses.py`, but we can use your filenames if you prefer.)*
+
+### Small updates to existing files
+
+* **`apis.py`**
+
+  * Add new request/response dataclasses for each plot type or:
+  * Introduce a `mode: Literal["zgrid","rootlocus","nyquist","nichols"]` in a unified `RunRequest`, plus specific fields (e.g., `num`, `den`, `Kmin/Kmax/numK`, `wmin/wmax/numW`, `grid_overlays`).
+* **`cli.py`**
+
+  * Switch to **subcommands**:
+
+    * `zgrid …`
+    * `rootlocus --num "1 0" --den "1 -0.6" --Kmin 0 --Kmax 100 --numK 400 …`
+    * `nyquist --num … --den … --numW 1200 …`
+    * `nichols --num … --den … …`
+  * Keep the import shim trick.
+* **`app.py`**
+
+  * Convert the app façade into a simple **dispatcher** (Strategy pattern):
+
+    * `ZGridPlotter.run(req) -> RunResult`
+    * `RootLocusPlotter.run(req) -> RunResult`
+    * `NyquistPlotter.run(req) -> RunResult`
+    * `NicholsPlotter.run(req) -> RunResult`
+* **`io.py`**
+
+  * Add parsers for transfer functions:
+
+    * `--num/--den` strings (`"1 0.5"` → `[1.0, 0.5]`)
+    * optional JSON/CSV formats (e.g., `{ "num": [...], "den": [...] }`)
+* **`design.py`**
+
+  * Leave as the z-grid renderer; keep new plotters in their own modules to avoid bloat.
+
+---
+
+## Minimal algorithms (discrete-time)
+
+### Root locus (z-plane)
+
+For unity feedback, closed-loop char poly:
+
+```
+D_cl(z; K) = den(z) + K * num(z)
+```
+
+For each K on a grid (e.g., lin/log), compute roots of `D_cl(z; K)`; those are the loci. Then:
+
+* overlay asymptotes (optional)
+* overlay unit circle (for discrete-time stability)
+* annotate breakaway points (optional later)
+
+### Nyquist (discrete)
+
+Use the **unit circle**: `z = e^{j ω}`, `ω ∈ [0, π]` (or `[0, 2π]` for convenience).
+Compute `H(e^{jω}) = Num(e^{jω})/Den(e^{jω})` and plot Re vs Im.
+
+### Nichols
+
+Transform the same `H(e^{jω})`:
+
+* `mag_db = 20 log10 |H|`, `phase_deg = unwrap(angle(H)) * 180/π`
+* Plot `phase_deg` vs `mag_db`. (Optionally overlay Nichols grid later.)
+
+---
+
+## CLI shape (example)
+
+```bash
+# Root locus (discrete-time, z-plane)
+python cli.py rootlocus \
+  --num "0.5 0.1" --den "1 -0.8" \
+  --Kmin 0 --Kmax 100 --numK 600 \
+  --backend mpl --png rlocus.png
+
+# Nyquist
+python cli.py nyquist \
+  --num "0.5 0.1" --den "1 -0.8" \
+  --numW 1200 --backend mpl --png nyquist.png
+
+# Nichols
+python cli.py nichols \
+  --num "0.5 0.1" --den "1 -0.8" \
+  --numW 1200 --backend mpl --png nichols.png
+```
+
+We’ll keep existing `zgrid` as:
+
+```bash
+python cli.py zgrid --T 0.05 --backend plotly --plotly zgrid.html
+```
+
+---
+
+## TDD plan (pytest)
+
+**Unit tests**
+
+* `models_test.py`
+
+  * build `ZTransferFunction` and evaluate polynomials; handle improper/leading zeros.
+* `responses_test.py`
+
+  * `closed_loop_char_poly(G,K)` returns expected coefficients for simple plants.
+  * `root_locus_points` on a toy plant produces loci on known branches (sanity: number of branches equals order of den).
+  * `freq_response` → check `|H(e^{j0})|` and `|H(e^{jπ})|` for simple filters.
+  * Nichols conversion: monotone phase sweep, finite mag dB.
+* `rlocus_plot_test.py`, `nyquist_plot_test.py`, `nichols_plot_test.py`
+
+  * call MPL renderer with temp outputs; assert PNG exists (and CSV exports if we add).
+* `cli_e2e_test.py`
+
+  * end-to-end runs for all three subcommands (MPL), minimal sizes; use `--num/--den` text inputs.
+
+**Golden baselines (optional)**
+
+* store a small JSON of expected poles for a micro plant at a couple of K values to catch regressions.
+
+---
+
+## Reuse & extensibility
+
+* **Common figure chrome** (unit circle, grids, legends) lives in small helpers (e.g., `plot_common.py`) to keep styles consistent.
+* Plotly support is a thin port once MPL works.
+* CSV export toggles (e.g., `--export_csv_prefix`) can dump root coordinates per K, Nyquist samples, Nichols points.
+
+---
+
+## Sketched interfaces (concise)
+
+```python
+# models.py
+@dataclass(frozen=True)
+class ZTransferFunction:
+    num: np.ndarray
+    den: np.ndarray
+    def h(self, z: complex) -> complex: ...
+    def H(self, z: np.ndarray) -> np.ndarray: ...
+
+# responses.py
+def closed_loop_char_poly(G: ZTransferFunction, K: float) -> np.ndarray: ...
+def root_locus_points(G: ZTransferFunction, K_grid: np.ndarray) -> list[np.ndarray]: ...
+def freq_response(G: ZTransferFunction, w: np.ndarray) -> np.ndarray: ...
+def nichols_coords(H: np.ndarray) -> tuple[np.ndarray, np.ndarray]: ...
+
+# rlocus_plot.py
+def draw_root_locus_mpl(G, K_grid, overlays=None, png=None, export_prefix=None, **style): ...
+
+# cli.py (subcommands)
+subparsers = p.add_subparsers(dest="mode", required=True)
+# add_zgrid(sub), add_rootlocus(sub), add_nyquist(sub), add_nichols(sub)
+```
+
+---
+
+## What I’d touch first
+
+1. **`apis.py`**: add `mode` + fields (num/den, K grid, ω grid).
+2. **`cli.py`**: switch to subcommands; parse `--num/--den` and grids.
+3. **`models.py`, `responses.py`**: minimal math to produce poles and H(e^{jω}).
+4. **`rlocus_plot.py`** (MPL first); **`nyquist_plot.py`**, **`nichols_plot.py`**.
+5. **`app.py`**: dispatcher to the proper plotter class.
+6. **Tests** for each step.
+
+If you want, I can ship a starter zip (skeleton modules + tests that execute a minimal root-locus, Nyquist, and Nichols on MPL) and wire a couple of CLI subcommands so you can iterate from a green baseline.
