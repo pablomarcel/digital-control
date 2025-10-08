@@ -1,0 +1,5 @@
+pytest zPlaneAnalysis/discreteResponseTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=zPlaneAnalysis/discreteResponseTool/.coveragerc \
+  --cov-report=term-missing
