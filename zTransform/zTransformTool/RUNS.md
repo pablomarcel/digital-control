@@ -97,7 +97,10 @@ python cli.py --iz --X "z**2/((z-1)**2*(z-exp(-a*T)))" --subs "a=1,T=1" --N 6 --
 
 ### B8) Diagnostic: list poles & residues for \(X(z) z^{k-1}\)
 ```bash
-python cli.py --iz --X "z*(1 - exp(-a*T))/((z-1)*(z-exp(-a*T)))" --subs "a=1,T=1" --residues --pretty
+python cli.py --iz \
+  --X "z*(1 - exp(-a*T))/((z-1)*(z-exp(-a*T)))" \
+  --subs "a=1,T=1" \
+  --N 6 --pretty
 ```
 
 ---

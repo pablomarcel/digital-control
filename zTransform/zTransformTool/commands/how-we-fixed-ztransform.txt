@@ -1,0 +1,115 @@
+yesss — green lights everywhere! 🎉
+Here’s what actually fixed B7 (and why it was so stubborn), plus the two “oops” that temporarily broke your run mid-way.
+
+---
+
+# What was broken (and why)
+
+## 1) The fitter was solving the **wrong linear system** the wrong way
+
+* For B7, (X(z)=\frac{z^2}{(z-1)^2(z-e^{-aT})}\Rightarrow X(u)=\frac{B(u)}{A(u)}) with
+  (A(u)=u^3+(-e^{aT}-2)u^2+(1+2e^{aT})u-e^{aT}) and (B(u)=-e^{aT}u).
+* That means an **input delay** of (d=1) (because (B(u)\sim u^1)).
+  Unilateral support starts at (k\ge1).
+
+The old “homogeneous correction” fitter:
+
+* included the **gated rows** (k<d) in the normal equations;
+* solved a **nearly singular** Vandermonde-ish system with `pinv`,
+* and got a least-squares compromise that didn’t match the recurrence samples.
+
+**Symptom**: big diffs in the test’s “closed vs seq” table.
+
+**Fix**: make the fitter solve the **exact, delay-aware** system.
+
+What we changed in `_fit_closed_form_to_seq`:
+
+* Compute the gate (d=\min{\text{exp of }u\text{ in }B(u)}\ge0).
+* Build the equations **only for usable rows** (k\ge d).
+* Evaluate the homogeneous basis at (k-d) and gate the correction by (\Theta(k-d)).
+* Slightly overdetermine the system:
+  `rows = min(len(seq), deg(A) + deg(B) + d + 2)` so we have enough clean equations.
+* **Prefer exact solve** with `sympy.linsolve`; fall back to `LUsolve`, and only then `pinv`.
+* Add heavy logging (`ZTT_LOG=1`, `ZTT_LOG_MATRICES=1`) so you can see `Mu`, `bu`, solver chosen, and post-fit diffs.
+
+That made the correction coefficients **exact** (on the integer grid), so the final closed-form *matches the unilateral recurrence samples* sample-by-sample — even for repeated poles and delays.
+
+## 2) Root multiplicities without brittle APIs
+
+We briefly tried `sympy.polys.polytools.multiplicity` (doesn’t exist in your SymPy).
+We replaced it with a robust helper:
+
+* Build the **characteristic polynomial** symbolically (no numeric nroots).
+* Use `sympy.factor_list` and collect **linear factors** ((r-\rho)^m) → multiplicities `m`.
+* Fall back to `P.roots()` / `solve` if needed.
+
+This keeps the basis (k^j\rho^k) (for (j=0..m-1)) correct, which is what lets the fitter express the missing pieces cleanly.
+
+## 3) A small but fatal call-site bug (introduced during edits)
+
+In `impulse_response_closed(...)` we compute the first `n` impulse samples `h0`, then must call:
+
+```python
+h_closed = _closed_form_via_rsolve_homog(A, h0, k_sym)
+```
+
+For a moment it got changed to `_closed_form_via_rsolve_homog(A, k_sym)` — missing the `h0` arg — causing the TypeError that blocked your test run. We fixed that 1-liner and things moved again.
+
+---
+
+# What started working (and how you can verify)
+
+* **Design matrix now only has usable rows** (k≥d). No bogus “0·C = nonzero” constraints.
+* **Exact coefficient solve**: your logs will typically show `solved via linsolve`.
+* **Post-fit diffs** in logs are zero on the fitted window.
+* The CLI output for B7 shows the closed form with the right structure:
+  a gated combination of `{1, k, e^{-k}}` starting at k≥1, i.e. exactly what repeated poles + a simple real pole should give you.
+
+---
+
+# Why this case was tricky
+
+* With delay (d=1), the **first row is gated** and shouldn’t constrain the homogeneous correction — but it was.
+* On small k, the columns ([1, k, e^{-k}]) are **poorly conditioned**; least-squares with a nearly singular matrix doesn’t recover the exact integer-grid identity.
+* Repeated poles inject **polynomial-in-k** factors, so the homogeneous space must include those (k^j\rho^k) terms (the multiplicities matter!).
+
+Once we:
+
+1. filtered out gated rows,
+2. solved exactly, and
+3. built the characteristic basis with proper multiplicities,
+   the whole pipeline snapped into place.
+
+---
+
+# What to keep for future you
+
+* **Env toggles** for debugging:
+
+  ```bash
+  ZTT_LOG=1 ZTT_LOG_MATRICES=1 pytest ...
+  ZTT_LOG=1 ZTT_LOG_MATRICES=1 python cli.py ...
+  ```
+
+  You’ll see: `deg(A)`, `deg(B)`, `delay d`, `basis_terms`, `Mu`, `bu`, solver used, post-fit diffs.
+
+* **Delay-aware fitting pattern (golden rule):**
+
+  * compute `d = min exp in B(u)`,
+  * only use rows `k >= d`,
+  * shift basis by `k-d`,
+  * gate the correction with `Heaviside(k-d,1)`.
+
+* **Symbolic first, numeric later**: use `factor_list` → exact multiplicities → `linsolve`.
+  Only let `LUsolve`/`pinv` handle numeric residues as a fallback.
+
+* **Impulse response trick**: build `h0` from the unilateral recurrence *then* solve the homogeneous recurrence with those ICs — it captures the (k)-polynomial pieces from repeated poles correctly.
+
+---
+
+# TL;DR (the two keys)
+
+1. **Make the fitter delay-aware and exact** (usable rows only, exact solve).
+2. **Use a robust symbolic multiplicity path** (no missing APIs) and pass the right ICs when building (h[k]).
+
+Everything else — the logging, the temporary import, and the missing `h0` argument — were just bumps on the road. You did the hard part: stuck with it until the real constraints (gate + exact solve + multiplicities) were all respected.
