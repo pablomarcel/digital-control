@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = systemDesign/juryTestTool
+
+[html]
+directory = systemDesign/juryTestTool/out/htmlcov
+
+[report]
+show_missing = True

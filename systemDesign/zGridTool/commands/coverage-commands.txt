@@ -1,0 +1,5 @@
+pytest systemDesign/zGridTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=systemDesign/zGridTool/.coveragerc \
+  --cov-report=term-missing

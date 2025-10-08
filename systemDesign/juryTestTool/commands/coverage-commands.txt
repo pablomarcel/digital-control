@@ -1,0 +1,5 @@
+pytest systemDesign/juryTestTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=systemDesign/juryTestTool/.coveragerc \
+  --cov-report=term-missing
