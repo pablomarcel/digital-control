@@ -1,0 +1,5 @@
+pytest stateSpace/stateSolverTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=stateSpace/stateSolverTool/.coveragerc \
+  --cov-report=term-missing
