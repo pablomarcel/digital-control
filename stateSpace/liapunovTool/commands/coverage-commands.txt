@@ -1,0 +1,5 @@
+pytest stateSpace/liapunovTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=stateSpace/liapunovTool/.coveragerc \
+  --cov-report=term-missing
