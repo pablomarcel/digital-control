@@ -20,15 +20,14 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 # Strict include list—only these top-level dirs will be treated as packages
 include = [
-  "frequencyResponse",
   "intro",
   "kalmanFilters",
   "polePlacement",
   "polynomialEquations",
   "quadraticOptimal",
-  "rootLocus",
   "rstControllers",
   "stateSpace",
+  "systemDesign",
   "zPlaneAnalysis",
   "zTransform",
 ]
