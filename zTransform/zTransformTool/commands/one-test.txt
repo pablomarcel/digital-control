@@ -1,0 +1,3 @@
+ZTT_LOG=1 ZTT_LOG_MATRICES=1 pytest zTransform/zTransformTool/tests/test_inverse_double_pole.py::test_inverse_double_pole_case_b7 -q
+
+ZTT_LOG=1 ZTT_LOG_MATRICES=1 python cli.py --iz --X "z**2/((z-1)**2*(z-exp(-a*T)))" --subs "a=1,T=1" --N 6 --pretty
