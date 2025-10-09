@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = polePlacement/observabilityTool
+
+[html]
+directory = polePlacement/observabilityTool/out/htmlcov
+
+[report]
+show_missing = True

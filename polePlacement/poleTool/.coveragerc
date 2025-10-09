@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = polePlacement/poleTool
+
+[html]
+directory = polePlacement/poleTool/out/htmlcov
+
+[report]
+show_missing = True
