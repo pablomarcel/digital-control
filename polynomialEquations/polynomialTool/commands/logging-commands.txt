@@ -1,0 +1,51 @@
+Alright — I cranked the verbosity to 11 in both the test and the core so we can see exactly what’s happening.
+
+Download the patch zip (drops right into your repo layout):
+**[polynomialTool_debug_patch.zip](sandbox:/mnt/data/polynomialTool_debug_patch.zip)**
+
+It contains:
+
+* `digitalControl/polynomialEquations/polynomialTool/core.py`
+  • Adds a loud `logging` logger (DEBUG level) and **tons** of debug lines across:
+
+  * `to_asc`, `to_desc`, `poly_conv_desc`, `poly_at1_desc`
+  * `_count_trailing_zeros_desc`, `factor_z_from_F_and_update_d`
+  * `ogata_sylvester_E`, `convmtx_desc`, `sylvester_matrix_desc`
+  * `diophantine` (both `ogata` and `desc` paths)
+  * `dlsim_safe`
+
+  • Guard in `convmtx_desc` — if `L <= 0`, it logs a warning and clamps to `1` to avoid the negative-dim error while we debug.
+
+* `digitalControl/polynomialEquations/polynomialTool/tests/test_core_desc_and_helpers.py`
+  • Your test, but now “noisy as ****”: explicit prints, input/outputs dumping, and a try/except with traceback in the failing case.
+
+### Suggested pytest commands (max noise)
+
+Focus on the failing test, show print output, and enable live logging:
+
+```bash
+pytest polynomialEquations/polynomialTool/tests/test_core_desc_and_helpers.py::test_diophantine_desc_lstsq \
+  -vv -s \
+  -o log_cli=true --log-cli-level=DEBUG
+```
+
+Then run the whole suite, still verbose:
+
+```bash
+pytest polynomialEquations/polynomialTool/tests \
+  -vv -s \
+  -o log_cli=true --log-cli-level=DEBUG \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=polynomialEquations/polynomialTool/.coveragerc \
+  --cov-report=term-missing
+```
+
+This will dump:
+
+* the computed `n, m, degS, degR, Ls, Lr`
+* the shapes of `EA`, `EB`, `E`, `rhs`
+* first elements where helpful
+* and if `L <= 0` happens anywhere, you’ll see a bright warning from `convmtx_desc` before it clamps and soldiers on
+
+If you want me to revert the `convmtx_desc` clamp once we identify the root cause, I can ship a clean patch afterwards.
