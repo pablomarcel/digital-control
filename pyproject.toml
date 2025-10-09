@@ -24,7 +24,7 @@ include = [
   "kalmanFilters",
   "polePlacement",
   "polynomialEquations",
-  "quadraticOptimal",
+  "quadraticControl",
   "rstControllers",
   "stateSpace",
   "systemDesign",

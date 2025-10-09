@@ -1,0 +1,9 @@
+mode: fh-dt
+G: [[0.9]]
+H: [[1.0]]
+Q: [[0.5]]
+R: [[1.2]]
+S: [[1.0]]
+M: [[0.2]]   # cross term -> app applies Ogata elimination internally
+N: 10
+x0: [1.0]

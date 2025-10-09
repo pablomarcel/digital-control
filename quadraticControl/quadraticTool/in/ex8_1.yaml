@@ -1,0 +1,17 @@
+mode: fh-dt
+
+G: [[0.3679]]
+H: [[0.6321]]
+
+Q: [[1.0]]
+R: [[1.0]]
+
+# Terminal weight S and horizon
+S: [[1.0]]
+N: 10
+
+# Initial state
+x0: [1.0]
+
+# (optional) symbols to override from CLI: --param k=v
+params: {}
