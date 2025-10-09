@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = polePlacement/transformationTool
+
+[html]
+directory = polePlacement/transformationTool/out/htmlcov
+
+[report]
+show_missing = True
