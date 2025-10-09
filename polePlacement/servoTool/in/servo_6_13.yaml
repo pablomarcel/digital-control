@@ -1,0 +1,19 @@
+# Ogata Example 6-13 (discrete)
+G: "0 1 0; 0 0 1; -0.12 -0.01 1"
+H: "0; 0; 1"
+C: "0.5 1 0"
+
+# Design & simulation defaults
+which: ogata
+method: acker
+N: 10
+ref: step
+observer_mode: current
+
+# Controller (u = -K2 x + K1 v)
+K1: "2/3"
+K2: "-0.12 0.3233333333333333 2"
+
+# Min-order observer (measured form, C*T = [I 0])
+Ke: "-0.6278190859903248; 0.7403846153846154"
+T:  "0.4 -0.8944271909999157 0; 0.8 0.4472135954999581 0; 0 0 1"

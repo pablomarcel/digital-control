@@ -1,0 +1,14 @@
+mode: lyap
+
+# G and Q may include symbols resolved from `params`
+G: [[1, 1],
+    [a, -1]]
+Q: [[1, 0],
+    [0, 1]]
+
+# initial state (optional; if present we’ll report J = 0.5 x0^T P x0)
+x0: [1, 0]
+
+# pick a specific 'a' here or override from CLI with --param a=-0.25
+params:
+  a: -0.25

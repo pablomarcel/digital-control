@@ -1,0 +1,14 @@
+mode: ct-siso-ogata
+
+# Continuous-time scalars
+a: -1.0
+b: 1.0
+T: 1.0
+
+# Horizon and terminal/initial conditions for the discretized problem
+N: 10
+S: 1.0
+x0: 1.0
+
+# (optional) override from CLI like: --param a=-0.9 --param T=0.8
+params: {}

@@ -1,0 +1,24 @@
+# in/servo.yaml
+mode: servo-lqr
+
+# Discrete plant (T = 0.1 s), Ogata p.598
+G: [[ 1.1048,  0.1035,  0.0,    0.0 ],
+    [ 2.1316,  1.1048,  0.0,    0.0 ],
+    [-0.0025, -0.0001,  1.0,    0.1 ],
+    [-0.0508, -0.0025,  0.0,    1.0 ]]
+H: [[-0.0051],
+    [-0.1035],
+    [ 0.0025],
+    [ 0.0501]]
+
+# Output: cart position y = x3
+C: [[0.0, 0.0, 1.0, 0.0]]
+
+# LQR weights on augmented state z=[x; v]
+# (emphasis on x1e=θ with 10 and x3e=x with 100)
+Qx: [[10.0, 0,   0,    0  ],
+     [0,    1.0, 0,    0  ],
+     [0,    0,   100.0,0  ],
+     [0,    0,   0,    1.0]]
+Qi: [[1.0]]        # weight on the integrator state v
+R:  [[1.0]]
