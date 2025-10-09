@@ -1,0 +1,16 @@
+mode: lyap-sweep
+
+G: [[1, 1],
+    [a, -1]]
+Q: [[1, 0],
+    [0, 1]]
+
+# optional: report J along the sweep using this x0
+x0: [1, 0]
+
+# sweep configuration (can be overridden with --sweep a=-0.25:0:501)
+sweep:
+  name: a
+  start: -0.25
+  stop: 0.0
+  points: 501
