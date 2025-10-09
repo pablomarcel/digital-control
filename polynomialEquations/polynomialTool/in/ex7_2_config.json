@@ -1,0 +1,12 @@
+{
+  "mode": "polydesign",
+  "A": "1,-2,1",
+  "B": "0.02,0.02",
+  "H": "1,-1.2,0.52",
+  "F": "1,0",
+  "layout": "ogata",
+  "config": 2,
+  "backend": "plotly",
+  "kmax": 40,
+  "save": "out/ex7_2_from_cfg"
+}

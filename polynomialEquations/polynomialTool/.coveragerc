@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = polynomialEquations/polynomialTool
+
+[html]
+directory = polynomialEquations/polynomialTool/out/htmlcov
+
+[report]
+show_missing = True
