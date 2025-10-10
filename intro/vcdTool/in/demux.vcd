@@ -1,0 +1,41 @@
+$date
+    today
+$end
+$version
+    demux-vcd-writer
+$end
+$timescale 1ns $end
+$scope module demux $end
+$var wire 2 s sel $end
+$var wire 8 x x $end
+$var wire 8 a y0 $end
+$var wire 8 b y1 $end
+$var wire 8 c y2 $end
+$var wire 8 d y3 $end
+$upscope $end
+$enddefinitions $end
+$dumpvars
+b00 s
+b00001010 x
+b00001010 a
+b00000000 b
+b00000000 c
+b00000000 d
+$end
+#0
+b00 s
+b00001010 x
+b00001010 a
+b00000000 b
+b00000000 c
+b00000000 d
+#10
+b11 s
+b00000100 x
+b00000000 a
+b00000100 d
+#20
+b10 s
+b11111111 x
+b11111111 c
+b00000000 d
