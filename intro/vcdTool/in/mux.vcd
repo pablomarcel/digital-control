@@ -1,0 +1,126 @@
+$date
+    today
+$end
+$version
+    mux-vcd-writer
+$end
+$timescale 1ns $end
+$scope module mux $end
+$var wire 2 s sel $end
+$var wire 8 a d0 $end
+$var wire 8 b d1 $end
+$var wire 8 c d2 $end
+$var wire 8 d d3 $end
+$var wire 8 y y $end
+$upscope $end
+$enddefinitions $end
+$dumpvars
+b00 s
+b00001010 a
+b00010100 b
+b00011110 c
+b00101000 d
+b00001010 y
+$end
+#0
+b00 s
+b00001010 a
+b00010100 b
+b00011110 c
+b00101000 d
+b00001010 y
+#10
+b01 s
+b00010100 y
+#20
+b10 s
+b00011110 y
+#30
+b11 s
+b00101000 y
+#40
+b01 s
+b10101010 a
+b10111011 b
+b11001100 c
+b11011101 d
+b10111011 y
+#50
+b11 s
+b11011101 y
+#60
+b10 s
+b00000000 a
+b11111111 b
+b01010101 c
+b10101010 d
+b01010101 y
+#70
+b01 s
+b11111111 y
+#80
+b00 s
+b00000000 y
+#90
+b11 s
+b00000001 a
+b00000010 b
+b00000011 c
+b00000100 d
+b00000100 y
+#100
+b00 s
+b11111111 a
+b00000000 b
+b00000000 c
+b00000000 d
+b11111111 y
+#110
+b01 s
+b00000000 a
+b11111111 b
+#120
+b10 s
+b00000000 b
+b11111111 c
+#130
+b11 s
+b00000000 c
+b11111111 d
+#140
+b00 s
+b00101100 a
+b00101000 b
+b00110010 c
+b00111100 d
+b00101100 y
+#150
+b01 s
+b00001111 a
+b00101100 b
+b00001111 c
+b00001111 d
+#160
+b10 s
+b00001111 b
+b00101100 c
+#170
+b11 s
+b00001111 c
+b00101100 d
+#180
+b10 s
+b00000101 a
+b00000110 b
+b00000111 c
+b00001000 d
+b00000111 y
+#190
+b00 s
+b00000101 y
+#200
+b01 s
+b00000110 y
+#210
+b11 s
+b00001000 y
