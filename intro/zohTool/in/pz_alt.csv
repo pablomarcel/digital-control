@@ -1,0 +1,4 @@
+z,kind,label
+0.80+0.35j,pole,Pc
+0.80-0.35j,pole,
+0.20+0j,zero,Zr

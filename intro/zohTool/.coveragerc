@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = intro/zohTool
+
+[html]
+directory = intro/zohTool/out/htmlcov
+
+[report]
+show_missing = True
