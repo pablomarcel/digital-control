@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = intro/vcdTool
+
+[html]
+directory = intro/vcdTool/out/htmlcov
+
+[report]
+show_missing = True
