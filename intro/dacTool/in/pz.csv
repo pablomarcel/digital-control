@@ -1,0 +1,4 @@
+re,im,kind,label
+0.90, 0.20, pole, P1
+0.90,-0.20, pole, P2
+0.40, 0.00, zero, Z1
