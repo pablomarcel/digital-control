@@ -22,6 +22,16 @@ This repo is a collection of focused, test-driven Python packages ("tools") that
 
 ## What’s inside (exhibits)
 
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-3D74F7.svg)](https://pablomarcel.github.io/control-digitalControl/)
+[![Build & Publish Docs](https://github.com/pablomarcel/control-digitalControl/actions/workflows/pages.yml/badge.svg)](https://github.com/pablomarcel/control-digitalControl/actions/workflows/pages.yml)
+
+## Documentation
+
+Live docs: **https://pablomarcel.github.io/control-digitalControl/**
+
+Per-package quick links:
+- [intro/adcTool](https://pablomarcel.github.io/control-digitalControl/intro/adcTool)
+
 Each subfolder is a cohesive package with its own CLI, tests, and a RUNS.md:
 
 ```
