@@ -114,6 +114,9 @@ def _cmd_sphinx_skel(ns: argparse.Namespace) -> None:
         "=============\n\n"
         ".. automodule:: intro.adcTool.app\n   :members:\n   :undoc-members:\n\n"
         ".. automodule:: intro.adcTool.apis\n   :members:\n   :undoc-members:\n"
+        ".. automodule:: intro.adcTool.core\n   :members:\n   :undoc-members:\n"
+        ".. automodule:: intro.adcTool.io\n   :members:\n   :undoc-members:\n"
+        ".. automodule:: intro.adcTool.utils\n   :members:\n   :undoc-members:\n"
     )
     makefile = (
         "# Minimal Sphinx Makefile\n"
