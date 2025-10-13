@@ -1,18 +1,19 @@
-# Digital Control App (Python) — CLI-First Study & Design Suite
+# Digital Control App — Python CLI-First Study & Design Suite
 
-> **Mission:** prove you can learn, reproduce, and *do* digital control systems without MATLAB®/Simulink® — using Python, a modern CLI workflow, and open libraries.
+> **Mission:** learn, reproduce, and *do* digital control systems without MATLAB®/Simulink® — using Python, a modern CLI workflow, and open libraries.
 
 This repo is a collection of focused, test-driven Python packages ("tools") that replicate and extend core workflows from **Ogata, *Discrete-Time Control Systems* (1995)** — plus related topics. Each package ships with a friendly **CLI**, example inputs, and a **RUNS.md** full of copy‑paste commands. No notebooks required, no proprietary stack needed.
 
 <p align="center">
-  <em>“It’s 2025 — do we really need MATLAB® for this?”</em>
+  <em>“do we really need MATLAB® for digital control?”</em>
 </p>
 
 ---
 
 ## Why this exists
 
-- I didn’t have a MATLAB® license - and I don't need one.
+- I don’t have a MATLAB® license - and I don't need one.
+- Ogata drowns you in matrices, so I had to create a computational tool to provide some relief.
 - Python’s ecosystem (NumPy, SciPy, SymPy, python‑control, etc.) can do everything the textbooks require — but it’s code-heavy.
 - So I wrapped the hard parts into clean **command‑line tools** with consistent I/O, file conventions, and tests.
 - The result is a **drop‑in study companion** and **reproducible design lab** for digital control.
