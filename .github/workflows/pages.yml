@@ -1,8 +1,9 @@
+# .github/workflows/pages.yml
 name: Build & Publish Docs
 
 on:
   push:
-    branches: [ main ]   # or your default branch
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -19,24 +20,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
-      - name: Install Sphinx + theme
+      - name: Install project deps + Sphinx
         run: |
           python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install sphinx furo || pip install sphinx alabaster
+          # If your project has a pyproject.toml/setup.cfg, this will help:
+          if [ -f pyproject.toml ] || [ -f setup.cfg ] || [ -f setup.py ]; then
+            pip install -e .
+          fi
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: 1
 
       - name: Build all Sphinx projects under */docs
+        env:
+          # Make the source tree importable even if editable install is skipped
+          PYTHONPATH: ${{ github.workspace }}
         shell: bash
         run: |
           set -euo pipefail
-          # find all docs dirs up to 4 levels deep (adjust as needed)
           mapfile -t DOCS < <(find . -type d -name docs -maxdepth 4 | sort)
           for D in "${DOCS[@]}"; do
             echo "==> Building $D"
-            ( cd "$D" && sphinx-build -b html . _build/html )
+            # -W makes warnings fail the job so we don't silently publish blanks
+            sphinx-build -b html -W --keep-going "$D" "$D/_build/html"
           done
 
       - name: Assemble site folder
@@ -47,7 +60,6 @@ jobs:
           INDEX="_site/index.html"
           echo '<!doctype html><meta charset="utf-8"><title>Docs</title><h1>Docs</h1><ul>' > "$INDEX"
           for D in "${DOCS[@]}"; do
-            # mount each docs site under its package path, e.g. intro/adcTool
             PKG_PATH="$(dirname "$D")"
             DEST="_site/${PKG_PATH#./}"
             if [ -d "$D/_build/html" ]; then
