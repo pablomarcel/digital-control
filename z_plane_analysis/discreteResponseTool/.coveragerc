@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = z_plane_analysis/discreteResponseTool
+
+[html]
+directory = z_plane_analysis/discreteResponseTool/out/htmlcov
+
+[report]
+show_missing = True

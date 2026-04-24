@@ -1,5 +1,0 @@
-pytest kalmanFilters/kalmanFilterTool/tests \
-  --override-ini addopts= \
-  --cov \
-  --cov-config=kalmanFilters/kalmanFilterTool/.coveragerc \
-  --cov-report=term-missing

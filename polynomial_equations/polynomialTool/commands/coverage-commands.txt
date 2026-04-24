@@ -1,0 +1,5 @@
+pytest polynomial_equations/polynomialTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=polynomial_equations/polynomialTool/.coveragerc \
+  --cov-report=term-missing

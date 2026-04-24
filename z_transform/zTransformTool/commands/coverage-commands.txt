@@ -1,0 +1,5 @@
+pytest z_transform/zTransformTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=z_transform/zTransformTool/.coveragerc \
+  --cov-report=term-missing
