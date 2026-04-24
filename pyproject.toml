@@ -20,16 +20,16 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 # Strict include list—only these top-level dirs will be treated as packages
 include = [
-  "intro",
-  "kalmanFilters",
-  "polePlacement",
-  "polynomialEquations",
-  "quadraticControl",
-  "rstControllers",
-  "stateSpace",
-  "systemDesign",
-  "zPlaneAnalysis",
-  "zTransform",
+  "introduction",
+  "kalman_filters",
+  "pole_placement",
+  "polynomial_equations",
+  "quadratic_control",
+  "rst_controllers",
+  "state_space",
+  "system_design",
+  "z_plane_analysis",
+  "z_transform",
 ]
 exclude = ["**/tests*", "**/__pycache__*"]
 

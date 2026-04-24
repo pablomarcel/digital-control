@@ -1,9 +1,9 @@
 [run]
 branch = True
-source = polePlacement/servoTool
+source = pole_placement/servoTool
 
 [html]
-directory = polePlacement/servoTool/out/htmlcov
+directory = pole_placement/servoTool/out/htmlcov
 
 [report]
 show_missing = True

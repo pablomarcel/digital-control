@@ -1,5 +1,5 @@
-pytest polePlacement/observerTool/tests \
+pytest pole_placement/observerTool/tests \
   --override-ini addopts= \
   --cov \
-  --cov-config=polePlacement/observerTool/.coveragerc \
+  --cov-config=pole_placement/observerTool/.coveragerc \
   --cov-report=term-missing
