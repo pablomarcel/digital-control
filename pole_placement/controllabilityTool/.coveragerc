@@ -1,9 +1,9 @@
 [run]
 branch = True
-source = polePlacement/controllabilityTool
+source = pole_placement/controllabilityTool
 
 [html]
-directory = polePlacement/controllabilityTool/out/htmlcov
+directory = pole_placement/controllabilityTool/out/htmlcov
 
 [report]
 show_missing = True

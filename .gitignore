@@ -90,19 +90,30 @@ Thumbs.db
 # ----------------------------
 # Project-specific artifacts
 # ----------------------------
-# Rotation app outputs (keep inputs under rotation/in tracked)
-rotation/out/
-introduction/out/
-# If other modules later mirror this pattern, this catches their out dirs at top-level
-acceleration/out/
-angular/out/
-applied/out/
-control/out/
-forward/out/
-inverse/out/
-motion/out/
-orientation/out/
-path/out/
-robot/out/
-time/out/
-velocity/out/
+# * app outputs (keep inputs under */in tracked)
+introduction/adcTool/out
+introduction/dacTool/out
+introduction/demuxTool/out
+introduction/muxTool/out
+introduction/vcdTool/out
+introduction/zohTool/out
+kalman_filters/kalmanFilterTool/out
+pole_placement/controllabilityTool/out
+pole_placement/observabilityTool/out
+pole_placement/observerTool/out
+pole_placement/poleTool/out
+pole_placement/servoTool/out
+pole_placement/transformationTool/out
+polynomial_equations/polynomialTool/out
+quadratic_control/quadraticTool/out
+rst_controllers/rstPlotTool/out
+rst_controllers/rstTool/out
+state_space/liapunovTool/out
+state_space/stateConverterTool/out
+state_space/stateSolverTool/out
+state_space/stateSpaceTool/out
+system_design/frequencyResponseTool/out
+system_design/juryTestTool/out
+system_design/zGridTool/out
+z_plane_analysis/discreteResponseTool/out
+z_transform/zTransformTool/out
