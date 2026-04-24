@@ -127,7 +127,7 @@ pip install -r requirements.txt
 Run a package-level command:
 
 ```bash
-cd systemDesign/zGridTool
+cd system_design/zGridTool
 python cli.py --help
 ```
 
@@ -138,7 +138,7 @@ Then open the package's `RUNS.md` file for tested example commands.
 A typical workflow is:
 
 ```bash
-cd systemDesign/zGridTool
+cd system_design/zGridTool
 python cli.py --help
 # choose a command from RUNS.md
 # review generated outputs in out/
@@ -169,9 +169,9 @@ Common output types include:
 Run tests for an individual tool from the repository root. For example:
 
 ```bash
-pytest systemDesign/zGridTool/tests \
+pytest system_design/zGridTool/tests \
   --cov \
-  --cov-config=systemDesign/zGridTool/.coveragerc \
+  --cov-config=system_design/zGridTool/.coveragerc \
   --cov-report=term-missing
 ```
 
