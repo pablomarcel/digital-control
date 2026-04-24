@@ -35,3 +35,5 @@ python cli.py --type sar --json vins.json --nbits 10 --vref 3.3 --tbit 5e-7 --tr
 python tools/class_diagram.py --out out
 ```
 # => out/adcTool_class_diagram.puml
+
+#### Sphinx
