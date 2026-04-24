@@ -1,0 +1,5 @@
+pytest quadratic_control/quadraticTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=quadratic_control/quadraticTool/.coveragerc \
+  --cov-report=term-missing

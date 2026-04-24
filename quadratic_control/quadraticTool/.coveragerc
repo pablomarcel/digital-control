@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = quadratic_control/quadraticTool
+
+[html]
+directory = quadratic_control/quadraticTool/out/htmlcov
+
+[report]
+show_missing = True
