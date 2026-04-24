@@ -1,188 +1,239 @@
-# Digital Control App — Python CLI-First Study & Design Suite
-
-> **Mission:** learn, reproduce, and *do* digital control systems without MATLAB®/Simulink® — using Python, a modern CLI workflow, and open libraries.
-
-This repo is a collection of focused, test-driven Python packages ("tools") that replicate and extend core workflows from **Ogata, *Discrete-Time Control Systems* (1995)** — plus related topics. Each package ships with a friendly **CLI**, example inputs, and a **RUNS.md** full of copy‑paste commands. No notebooks required, no proprietary stack needed.
-
-<p align="center">
-  <em>“do we really need MATLAB® for digital control?”</em>
-</p>
-
----
-
-## Why this exists
-
-- I don’t have a MATLAB® license - and I don't need one.
-- Ogata drowns you in matrices, so I had to create a computational tool to provide some relief.
-- Python’s ecosystem (NumPy, SciPy, SymPy, python‑control, etc.) can do everything the textbooks require — but it’s code-heavy.
-- So I wrapped the hard parts into clean **command‑line tools** with consistent I/O, file conventions, and tests.
-- The result is a **drop‑in study companion** and **reproducible design lab** for digital control.
-
----
-
-## What’s inside (exhibits)
+# Digital Control
 
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-3D74F7.svg)](https://pablomarcel.github.io/control-digitalControl/)
 [![Build & Publish Docs](https://github.com/pablomarcel/control-digitalControl/actions/workflows/pages.yml/badge.svg)](https://github.com/pablomarcel/control-digitalControl/actions/workflows/pages.yml)
 
+Digital Control is a Python-based collection of command-line tools for studying, simulating, and designing discrete-time control systems. The project focuses on reproducible engineering workflows inspired by standard digital-control topics, including z-transforms, z-plane analysis, state-space methods, pole placement, observers, Kalman filtering, RST controllers, LQR, Jury stability, zero-order hold behavior, ADC/DAC models, and related digital-system utilities.
+
+The repository is organized as a set of focused packages. Each tool provides a command-line interface, example inputs, repeatable run commands, and file-based outputs so that analyses can be reproduced without relying on notebooks or proprietary desktop software.
+
 ## Documentation
 
-Live docs: **https://pablomarcel.github.io/control-digitalControl/**
+Live documentation is available here:
 
-Per-package quick links:
+**https://pablomarcel.github.io/control-digitalControl/**
+
+Per-package documentation begins with:
+
 - [intro/adcTool](https://pablomarcel.github.io/control-digitalControl/intro/adcTool)
 
-Each subfolder is a cohesive package with its own CLI, tests, and a RUNS.md:
+## Project Goals
 
-```
+Digital Control is intended to serve as a practical study and design environment for discrete-time control systems. The main goals are:
+
+- provide small, testable tools for individual digital-control topics;
+- keep workflows reproducible through command-line execution and file-based inputs;
+- generate useful engineering artifacts such as JSON, CSV, HTML, PNG, and VCD outputs;
+- make textbook-style computations easier to inspect, repeat, and extend;
+- support both learning workflows and exploratory design studies.
+
+## Repository Structure
+
+```text
 intro/
-  adcTool/                # Counter & SAR ADC simulators
-  dacTool/                # DAC staircases & quantization models
-  demuxTool/              # N‑way digital demultiplexer (PyRTL)
-  muxTool/                # N‑way digital multiplexer (PyRTL)
-  vcdTool/                # VCD helpers: validate/merge/summarize
-  zohTool/                # Zero‑order hold & droop models
+  adcTool/                # Counter and SAR ADC simulators
+  dacTool/                # DAC staircase and quantization models
+  demuxTool/              # N-way digital demultiplexer models
+  muxTool/                # N-way digital multiplexer models
+  vcdTool/                # VCD validation, merge, and summary helpers
+  zohTool/                # Zero-order hold and droop models
 
 kalmanFilters/
-  kalmanFilterTool/       # Discrete Kalman filtering: steady‑state; time‑varying
+  kalmanFilterTool/       # Discrete Kalman filtering
 
 polePlacement/
-  controllabilityTool/    # Controllability tests (rank/Gramian), CCF
-  observabilityTool/      # Observability tests & OCF transforms
-  observerTool/           # Luenberger/Kalman observers, pole placement
-  poleTool/               # Discrete pole placement (deadbeat/Ackermann)
-  servoTool/              # Integral‑action servo design (augmented)
-  transformationTool/     # Canonical‑form transforms (CCF/OCF)
+  controllabilityTool/    # Controllability tests, rank checks, and Gramians
+  observabilityTool/      # Observability tests and observable canonical form
+  observerTool/           # Observer and estimator design workflows
+  poleTool/               # Discrete pole-placement methods
+  servoTool/              # Integral-action servo design
+  transformationTool/     # Canonical-form transformations
 
 polynomialEquations/
-  polynomialTool/         # Diophantine/RST synthesis & solvers
+  polynomialTool/         # Polynomial and Diophantine-equation workflows
 
 quadraticControl/
-  quadraticTool/          # Finite‑/steady‑state LQR (discrete)
+  quadraticTool/          # Finite-horizon and steady-state discrete LQR
 
 rstControllers/
-  rstTool/                # RST controller synthesis (Diophantine)
-  rstPlotTool/            # Response plots for designed RST
+  rstTool/                # RST controller synthesis
+  rstPlotTool/            # RST response plotting and visualization
 
 stateSpace/
-  stateSpaceTool/         # Solve x[k+1]=Ax+Bu; y=Cx
-  stateConverterTool/     # TF↔SS, discretization, pulse TF matrix
-  stateSolverTool/        # Leverrier, Φ(k) solver, step/impulse
+  stateSpaceTool/         # Discrete state-space simulation
+  stateConverterTool/     # Transfer-function/state-space conversion and discretization
+  stateSolverTool/        # State-transition and response solvers
   liapunovTool/           # Discrete Lyapunov stability analysis
 
 systemDesign/
-  frequencyResponseTool/  # w‑plane design: Bode + lead/lag
-  juryTestTool/           # Jury stability table & margins
-  zGridTool/              # z‑plane overlays: ζ, ω_n, ω_d, T_s
+  frequencyResponseTool/  # Frequency-response design support
+  juryTestTool/           # Jury stability analysis
+  zGridTool/              # z-plane design grids and overlays
 
 zPlaneAnalysis/
-  discreteResponseTool/   # Unit‑step/impulse responses; overlays
+  discreteResponseTool/   # Discrete impulse and step response analysis
 
 zTransform/
-  zTransformTool/         # Z / inverse‑Z, properties, difference eqs
+  zTransformTool/         # Z-transform, inverse Z-transform, and difference equations
 ```
 
-> Each folder includes a **`RUNS.md`** with *single‑command* examples to run **from inside that package**. Most tools accept JSON/CSV/YAML inputs and write results to `out/` (CSV/JSON/HTML/PNG/VCD).
+Most packages include:
 
----
+- `cli.py` for command-line execution;
+- `apis.py`, `core.py`, `app.py`, `io.py`, or similar modules for structured implementation;
+- `in/` for example inputs;
+- `out/` for generated outputs;
+- `RUNS.md` with copy-paste command examples;
+- `tests/` for package-level validation.
 
-## Design philosophy
+## Design Principles
 
-- **CLI‑first**: Everything important is a flag, not hidden in a notebook cell.
-- **Reproducible**: Inputs live in `in/`, outputs in `out/`, commands in `RUNS.md`.
-- **Test‑driven**: `pytest` suites for each tool; coverage reports during refactors.
-- **Pragmatic math**: Uses python‑control where helpful, but falls back to explicit numerics when necessary for robustness/clarity.
-- **Teacher‑friendly**: Plots (Matplotlib and Plotly), CSV/JSON exports, and clean logs you can paste into lectures/reports.
+### CLI-first workflow
 
----
+The tools are designed to be run from the terminal. Important options are exposed as command-line flags, and package-specific examples are documented in `RUNS.md` files.
 
-## Quick start
+### Reproducible inputs and outputs
+
+Inputs are stored in package-level `in/` folders. Outputs are written to `out/` folders. This keeps each example easy to rerun, compare, and archive.
+
+### Small packages with focused responsibilities
+
+Each tool targets a specific topic rather than trying to be a monolithic control-systems application. This makes the code easier to test, debug, and extend.
+
+### Open Python stack
+
+The project uses the Python scientific-computing ecosystem, including NumPy, SciPy, SymPy, Matplotlib, Plotly, python-control, PyRTL, and related packages where appropriate.
+
+### Testable engineering calculations
+
+The project emphasizes repeatable numerical workflows. Tests are included at the package level to support refactoring and to protect existing behavior.
+
+## Quick Start
 
 ```bash
-# 1) Clone and create a virtual env (example)
+# Clone the repository
 git clone https://github.com/pablomarcel/control-digitalControl.git
 cd digitalControl
-python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-# 2) Install dependencies
-pip install -U pip
+# Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+
+# Install dependencies
+python -m pip install --upgrade pip
 pip install -r requirements.txt
-
-# 3) Run a demo from *inside* a package
-cd systemDesign/zGridTool
-python cli.py --help
-# See RUNS.md for copy‑pasteable commands per package
-
-# 4) Run tests (per tool)
-cd ../../
-pytest systemDesign/zGridTool/tests --cov --cov-config=systemDesign/zGridTool/.coveragerc --cov-report=term-missing
 ```
 
-> The repo uses a **consistent import shim** in each package so that `python cli.py ...` works when you `cd` into that folder.
-
----
-
-## I/O conventions
-
-- **Inputs**: `in/` (e.g., JSON/CSV/YAML/VCD)
-- **Outputs**: `out/` (CSV / JSON manifests / PNG / HTML / VCD)
-- **Logs**: human‑readable console logs; many CLIs support `--pretty` and `--save_json/--save_csv`
-
-Common capabilities across tools:
-- print numeric results to console
-- export matrices, roots, responses to **CSV/JSON**
-- write **Plotly** interactive HTML and **Matplotlib** PNGs
-- write **VCD** traces where it makes sense (e.g., converters, mux/demux)
-
----
-
-## Example: z‑Grid overlay (systemDesign/zGridTool)
+Run a package-level command:
 
 ```bash
 cd systemDesign/zGridTool
 python cli.py --help
-# …then pick a command from RUNS.md to overlay poles/zeros and export an interactive Plotly HTML
 ```
 
----
+Then open the package's `RUNS.md` file for tested example commands.
 
-## Tested setup
+## Example Workflow
 
-- Python 3.13 (also works with 3.11/3.12 in most tools)
-- NumPy 2.x, SciPy 1.15.x, SymPy 1.13.x, matplotlib 3.10.x, plotly 5.x
-- macOS 13.7, Windows 10/11 (CLI + plots)
-- Continuous refactors with `pytest` suites per tool
+A typical workflow is:
 
-See `requirements.txt` for exact pins.
+```bash
+cd systemDesign/zGridTool
+python cli.py --help
+# choose a command from RUNS.md
+# review generated outputs in out/
+```
 
----
+For tools that support plotting, outputs may include static Matplotlib images or interactive Plotly HTML files. Tools that model digital logic or converter timing may also emit VCD traces.
+
+## Input and Output Conventions
+
+Common conventions across the repository:
+
+```text
+in/      example inputs such as JSON, CSV, YAML, or VCD files
+out/     generated outputs such as JSON, CSV, PNG, HTML, or VCD files
+RUNS.md  reproducible command examples for the package
+```
+
+Common output types include:
+
+- JSON result packs for structured numerical output;
+- CSV exports for matrices, roots, time histories, and frequency-response data;
+- PNG figures for reports and documentation;
+- interactive HTML plots for visual inspection;
+- VCD files for digital timing traces where applicable.
+
+## Testing
+
+Run tests for an individual tool from the repository root. For example:
+
+```bash
+pytest systemDesign/zGridTool/tests \
+  --cov \
+  --cov-config=systemDesign/zGridTool/.coveragerc \
+  --cov-report=term-missing
+```
+
+To run all available tests:
+
+```bash
+pytest
+```
+
+## Development Notes
+
+The repository uses a package-per-tool structure. When adding or modifying a tool:
+
+- keep the command-line interface clear and documented;
+- keep example inputs under `in/`;
+- write generated files under `out/`;
+- update `RUNS.md` with reproducible commands;
+- add tests for new solver paths or important behavior changes;
+- prefer structured dataclasses or clear schemas for inputs and outputs.
+
+## Documentation Build
+
+The project includes GitHub Pages documentation generated from package-level Sphinx projects. The documentation workflow builds the generated documentation and publishes it to the project Pages site.
+
+Local documentation builds may be run from individual docs folders when needed:
+
+```bash
+sphinx-build -b html path/to/docs path/to/docs/_build/html
+```
+
+## Requirements
+
+The project is developed against modern Python versions and the scientific Python ecosystem. See `requirements.txt` for pinned dependencies.
+
+Typical dependencies include:
+
+- NumPy
+- SciPy
+- SymPy
+- Matplotlib
+- Plotly
+- python-control
+- PyRTL
+- pytest
+- Sphinx and Furo for documentation
 
 ## Contributing
 
-Issues and PRs are welcome:
-- Respect the folder structure and the **CLI‑first** approach.
-- Keep inputs in `in/`, outputs in `out/`, and runnable **RUNS.md** examples.
-- Add or update **tests** with any new feature or refactor.
-- Prefer small, focused modules and clean dataclasses for I/O (`apis.py`).
+Contributions are welcome. Good contributions are small, reproducible, and tested.
 
-A simple PR checklist:
-- [ ] `pytest` passes locally for the changed tool(s)
-- [ ] `RUNS.md` updated with new/changed commands
-- [ ] New flags documented in `cli.py --help`
-- [ ] Outputs reproducible under `out/`
+Before opening a pull request:
 
----
+- run the relevant package tests;
+- update `RUNS.md` if command behavior changed;
+- document new CLI flags in `--help` text;
+- include or update example inputs when adding solver paths;
+- verify that generated outputs are written to the expected `out/` folder.
 
 ## License
 
-This project is released under the **MIT License** (see `LICENSE`).
-
----
+This project is released under the MIT License. See `LICENSE` for details.
 
 ## Acknowledgments
 
-- K. Ogata, *Discrete-Time Control Systems* (1995)
-- The Python open-source ecosystem: NumPy, SciPy, SymPy, matplotlib, plotly, python‑control, and many others.
-
----
-
+This project is informed by standard digital-control coursework and references, especially K. Ogata's *Discrete-Time Control Systems*, along with the broader Python open-source scientific-computing ecosystem.
