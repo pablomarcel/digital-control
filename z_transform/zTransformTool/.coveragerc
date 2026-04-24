@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = z_transform/zTransformTool
+
+[html]
+directory = z_transform/zTransformTool/out/htmlcov
+
+[report]
+show_missing = True

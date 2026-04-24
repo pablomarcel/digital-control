@@ -1,9 +1,0 @@
-[run]
-branch = True
-source = zPlaneAnalysis/discreteResponseTool
-
-[html]
-directory = zPlaneAnalysis/discreteResponseTool/out/htmlcov
-
-[report]
-show_missing = True
