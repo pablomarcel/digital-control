@@ -92,7 +92,7 @@ Thumbs.db
 # ----------------------------
 # Rotation app outputs (keep inputs under rotation/in tracked)
 rotation/out/
-intro/out/
+introduction/out/
 # If other modules later mirror this pattern, this catches their out dirs at top-level
 acceleration/out/
 angular/out/

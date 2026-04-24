@@ -1,5 +1,0 @@
-pytest intro/zohTool/tests \
-  --override-ini addopts= \
-  --cov \
-  --cov-config=intro/zohTool/.coveragerc \
-  --cov-report=term-missing

@@ -1,5 +1,0 @@
-pytest intro/dacTool/tests \
-  --override-ini addopts= \
-  --cov \
-  --cov-config=intro/dacTool/.coveragerc \
-  --cov-report=term-missing

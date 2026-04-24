@@ -1,9 +1,0 @@
-[run]
-branch = True
-source = intro/dacTool
-
-[html]
-directory = intro/dacTool/out/htmlcov
-
-[report]
-show_missing = True
