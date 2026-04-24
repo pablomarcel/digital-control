@@ -1,9 +1,9 @@
 [run]
 branch = True
-source = systemDesign/juryTestTool
+source = system_design/juryTestTool
 
 [html]
-directory = systemDesign/juryTestTool/out/htmlcov
+directory = system_design/juryTestTool/out/htmlcov
 
 [report]
 show_missing = True

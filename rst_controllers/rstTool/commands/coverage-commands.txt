@@ -1,5 +1,5 @@
-pytest rstControllers/rstTool/tests \
+pytest rst_controllers/rstTool/tests \
   --override-ini addopts= \
   --cov \
-  --cov-config=rstControllers/rstTool/.coveragerc \
+  --cov-config=rst_controllers/rstTool/.coveragerc \
   --cov-report=term-missing

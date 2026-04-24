@@ -1,9 +1,0 @@
-[run]
-branch = True
-source = stateSpace/liapunovTool
-
-[html]
-directory = stateSpace/liapunovTool/out/htmlcov
-
-[report]
-show_missing = True

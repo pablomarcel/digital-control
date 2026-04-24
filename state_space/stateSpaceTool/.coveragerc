@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = state_space/stateSpaceTool
+
+[html]
+directory = state_space/stateSpaceTool/out/htmlcov
+
+[report]
+show_missing = True

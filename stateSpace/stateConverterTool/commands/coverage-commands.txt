@@ -1,5 +1,0 @@
-pytest stateSpace/stateConverterTool/tests \
-  --override-ini addopts= \
-  --cov \
-  --cov-config=stateSpace/stateConverterTool/.coveragerc \
-  --cov-report=term-missing

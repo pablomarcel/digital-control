@@ -1,9 +1,9 @@
 [run]
 branch = True
-source = rstControllers/rstPlotTool
+source = rst_controllers/rstPlotTool
 
 [html]
-directory = rstControllers/rstPlotTool/out/htmlcov
+directory = rst_controllers/rstPlotTool/out/htmlcov
 
 [report]
 show_missing = True

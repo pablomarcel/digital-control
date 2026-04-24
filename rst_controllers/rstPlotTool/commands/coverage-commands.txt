@@ -1,5 +1,5 @@
-pytest rstControllers/rstPlotTool/tests \
+pytest rst_controllers/rstPlotTool/tests \
   --override-ini addopts= \
   --cov \
-  --cov-config=rstControllers/rstPlotTool/.coveragerc \
+  --cov-config=rst_controllers/rstPlotTool/.coveragerc \
   --cov-report=term-missing
