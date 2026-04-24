@@ -1,5 +1,0 @@
-pytest intro/demuxTool/tests \
-  --override-ini addopts= \
-  --cov \
-  --cov-config=intro/demuxTool/.coveragerc \
-  --cov-report=term-missing

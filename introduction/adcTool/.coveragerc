@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = introduction/adcTool
+
+[html]
+directory = introduction/adcTool/out/htmlcov
+
+[report]
+show_missing = True

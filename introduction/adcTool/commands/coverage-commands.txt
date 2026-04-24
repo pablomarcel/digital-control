@@ -1,0 +1,5 @@
+pytest introduction/adcTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=introduction/adcTool/.coveragerc \
+  --cov-report=term-missing

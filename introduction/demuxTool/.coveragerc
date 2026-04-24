@@ -1,0 +1,9 @@
+[run]
+branch = True
+source = introduction/demuxTool
+
+[html]
+directory = introduction/demuxTool/out/htmlcov
+
+[report]
+show_missing = True

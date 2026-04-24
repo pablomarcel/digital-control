@@ -1,0 +1,5 @@
+pytest introduction/muxTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=introduction/muxTool/.coveragerc \
+  --cov-report=term-missing

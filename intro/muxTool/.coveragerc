@@ -1,9 +1,0 @@
-[run]
-branch = True
-source = intro/muxTool
-
-[html]
-directory = intro/muxTool/out/htmlcov
-
-[report]
-show_missing = True
