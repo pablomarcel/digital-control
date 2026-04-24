@@ -1,0 +1,14 @@
+pytest state_space/stateSpaceTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=state_space/stateSpaceTool/.coveragerc \
+  --cov-report=term-missing
+
+///
+
+pytest state_space/stateSpaceTool/tests \
+  --override-ini addopts= \
+  --cov \
+  --cov-config=state_space/stateSpaceTool/.coveragerc \
+  --cov-report=term-missing \
+  -o log_cli=true --log-cli-level=DEBUG

@@ -1,9 +1,9 @@
 [run]
 branch = True
-source = systemDesign/zGridTool
+source = system_design/zGridTool
 
 [html]
-directory = systemDesign/zGridTool/out/htmlcov
+directory = system_design/zGridTool/out/htmlcov
 
 [report]
 show_missing = True

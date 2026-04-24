@@ -1,9 +1,9 @@
 [run]
 branch = True
-source = systemDesign/frequencyResponseTool
+source = system_design/frequencyResponseTool
 
 [html]
-directory = systemDesign/frequencyResponseTool/out/htmlcov
+directory = system_design/frequencyResponseTool/out/htmlcov
 
 [report]
 show_missing = True

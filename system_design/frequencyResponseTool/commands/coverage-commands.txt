@@ -1,5 +1,5 @@
-pytest systemDesign/frequencyResponseTool/tests \
+pytest system_design/frequencyResponseTool/tests \
   --override-ini addopts= \
   --cov \
-  --cov-config=systemDesign/frequencyResponseTool/.coveragerc \
+  --cov-config=system_design/frequencyResponseTool/.coveragerc \
   --cov-report=term-missing
