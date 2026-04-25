@@ -1,92 +1,407 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-from __future__ import annotations
-import argparse, os, sys, json
+"""
+Command-line interface for :mod:`pole_placement.servoTool`.
 
-# Import shim so `python cli.py` works with absolute imports
-if __package__ in (None, ''):
-    pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+The CLI preserves the original servo-tool subcommands:
+
+* ``example``
+* ``design``
+* ``observer``
+* ``sim``
+
+It also adds a ``sphinx-skel`` helper for generating a conservative,
+GitHub Pages friendly Sphinx documentation skeleton.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib
+import importlib.util
+import json
+import os
+import sys
+from pathlib import Path
+
+
+# ---------- Import shim so `python cli.py` works with absolute imports ----------
+if __package__ in (None, ""):
+    # Running as a script: add project root to sys.path and import absolute modules.
+    pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     if pkg_root not in sys.path:
         sys.path.insert(0, pkg_root)
+
     from pole_placement.servoTool.apis import RunRequest
     from pole_placement.servoTool.app import ServoApp
 else:
     from .apis import RunRequest
     from .app import ServoApp
 
-def build_parser():
-    p = argparse.ArgumentParser(prog='pole_placement.servoTool', description='Servo-system design & simulation (Ogata Ch.6)')
-    sub = p.add_subparsers(dest='cmd', required=True)
 
-    def add_eq_opts(pp):
-        pp.add_argument('--eq', action='store_true', help='Print one-liner equations.')
-        pp.add_argument('--eq-stdout', action='store_true', help='Send equations to stdout (default: stderr).')
-        pp.add_argument('--eq-file', type=str, default=None, help='Write equations to this file (overrides stdout/stderr).')
+_PACKAGE = "pole_placement.servoTool"
+_PROJECT = "Digital Control - pole_placement.servoTool"
+_AUTHOR = "Digital Control"
 
-    s = sub.add_parser('example', help='Run Ogata Example 6-13 end-to-end')
-    s.add_argument('--plot', action='store_true')
-    s.add_argument('--plotly', action='store_true')
-    s.add_argument('--html', type=str, default=None)
-    s.add_argument('--open', action='store_true')
-    s.add_argument('--savefig', type=str, default=None)
-    add_eq_opts(s)
+_REQUIRED_MODULES = [
+    "pole_placement.servoTool.cli",
+    "pole_placement.servoTool.apis",
+]
 
-    s = sub.add_parser('design', help='Design K1, K2')
-    s.add_argument('--config', type=str, default=None)
-    s.add_argument('--G', type=str); s.add_argument('--H', type=str); s.add_argument('--C', type=str)
-    s.add_argument('--which', type=str, choices=['ogata', 'aug'], default='ogata')
-    s.add_argument('--method', type=str, choices=['acker', 'place', 'acker_ct'], default='acker')
-    s.add_argument('--poles', type=str, default=None, help="e.g. '0,0,0,0' or '0.6,0.6,0.5,0.5'")
-    s.add_argument('--csv', type=str, default=None); s.add_argument('--out', type=str, default=None)
-    add_eq_opts(s)
+_OPTIONAL_MODULES = [
+    "pole_placement.servoTool.app",
+    "pole_placement.servoTool.core",
+    "pole_placement.servoTool.io",
+    "pole_placement.servoTool.utils",
+    "pole_placement.servoTool.plotting",
+    "pole_placement.servoTool.design",
+    "pole_placement.servoTool.examples",
+]
 
-    s = sub.add_parser('observer', help='Design minimum-order observer (measured form)')
-    s.add_argument('--config', type=str, default=None)
-    s.add_argument('--G', type=str); s.add_argument('--H', type=str); s.add_argument('--C', type=str)
-    s.add_argument('--method', type=str, choices=['acker', 'place', 'acker_ct'], default='acker')
-    s.add_argument('--poles', type=str, default=None, help="'0,0' for deadbeat second order, etc.")
-    s.add_argument('--csv', type=str, default=None); s.add_argument('--out', type=str, default=None)
-    s.add_argument('--observer-mode', type=str, choices=['current', 'prediction'], default='current')
-    add_eq_opts(s)
+_AUTODOC_MOCK_IMPORTS = [
+    "control",
+    "matplotlib",
+    "matplotlib.pyplot",
+    "numpy",
+    "pandas",
+    "plotly",
+    "plotly.graph_objects",
+    "scipy",
+    "scipy.linalg",
+    "scipy.signal",
+    "sympy",
+]
 
-    s = sub.add_parser('sim', help='Simulate u = -K2 x + K1 v')
-    s.add_argument('--config', type=str, default=None)
-    s.add_argument('--G', type=str); s.add_argument('--H', type=str); s.add_argument('--C', type=str)
-    s.add_argument('--K1', type=str); s.add_argument('--K2', type=str)
-    s.add_argument('--N', type=int, default=10); s.add_argument('--ref', type=str, default='step')
-    s.add_argument('--use-observer', action='store_true')
-    s.add_argument('--observer-mode', type=str, choices=['current', 'prediction'], default='current')
-    s.add_argument('--Ke', type=str, default=None); s.add_argument('--T', type=str, default=None)
-    s.add_argument('--csv', type=str, default=None); s.add_argument('--out', type=str, default=None)
-    s.add_argument('--plot', action='store_true'); s.add_argument('--savefig', type=str, default=None)
-    s.add_argument('--plotly', action='store_true'); s.add_argument('--html', type=str, default=None); s.add_argument('--open', action='store_true')
-    add_eq_opts(s)
+
+def _module_is_importable(module_name: str) -> bool:
+    """Return ``True`` only when a module can actually be imported.
+
+    ``importlib.util.find_spec`` can report that a module exists even when the
+    module still fails during import because an optional dependency is missing.
+    Sphinx autodoc needs importable modules, so this helper performs the stricter
+    check used by the generated API page.
+    """
+    try:
+        if importlib.util.find_spec(module_name) is None:
+            return False
+        importlib.import_module(module_name)
+    except Exception:
+        return False
+    return True
+
+
+def _available_modules() -> list[str]:
+    """Return package modules that are safe for Sphinx autodoc to import."""
+    modules: list[str] = []
+    for mod in [*_REQUIRED_MODULES, *_OPTIONAL_MODULES]:
+        if _module_is_importable(mod):
+            modules.append(mod)
+    return modules
+
+
+def _rst_heading(text: str, underline: str = "=") -> str:
+    """Return a reStructuredText heading with a matching underline length."""
+    return f"{text}\n{underline * len(text)}\n\n"
+
+
+def _write_if_needed(path: Path, text: str, *, force: bool = False) -> bool:
+    """Write ``text`` unless ``path`` already exists and overwrite is disabled."""
+    if path.exists() and not force:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
+def _ensure_sphinx_support_dirs(dest: Path) -> None:
+    """Create Sphinx support directories and tracked placeholder files."""
+    for dirname in ("_templates", "_static"):
+        folder = dest / dirname
+        folder.mkdir(parents=True, exist_ok=True)
+        gitkeep = folder / ".gitkeep"
+        if not gitkeep.exists():
+            gitkeep.write_text("", encoding="utf-8")
+
+
+def _build_conf_py() -> str:
+    """Build a conservative Sphinx ``conf.py`` for GitHub Pages deployments."""
+    return f"""# Generated by {_PACKAGE}.cli
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# docs -> servoTool -> pole_placement -> repository root
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
+
+project = {_PROJECT!r}
+author = {_AUTHOR!r}
+
+extensions = [
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.viewcode",
+]
+
+templates_path = ["_templates"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+html_theme = "furo"
+html_static_path = ["_static"]
+
+autodoc_typehints = "description"
+autodoc_mock_imports = {_AUTODOC_MOCK_IMPORTS!r}
+napoleon_google_docstring = True
+napoleon_numpy_docstring = True
+"""
+
+
+def _build_index_rst() -> str:
+    """Build a Sphinx ``index.rst`` page with safe heading underline lengths."""
+    title = f"Welcome to {_PACKAGE}'s documentation"
+    return (
+        f".. {_PACKAGE} documentation master file\n\n"
+        + _rst_heading(title, "=")
+        + ".. toctree::\n"
+        + "   :maxdepth: 2\n"
+        + "   :caption: Contents:\n\n"
+        + "   api\n"
+    )
+
+
+def _build_api_rst() -> str:
+    """Build an API page that includes only importable modules."""
+    parts: list[str] = [_rst_heading("API Reference", "=")]
+    modules = _available_modules()
+
+    if not modules:
+        parts.append(
+            "No modules were importable when this API page was generated.\n\n"
+            "Regenerate the Sphinx skeleton from an environment where the package "
+            "can be imported, or install the package dependencies before building docs.\n"
+        )
+        return "".join(parts)
+
+    for mod in modules:
+        parts.append(_rst_heading(mod, "-"))
+        parts.append(f".. automodule:: {mod}\n")
+        parts.append("   :members:\n")
+        parts.append("   :undoc-members:\n")
+        parts.append("   :show-inheritance:\n\n")
+
+    return "".join(parts)
+
+
+def _build_makefile() -> str:
+    """Build the minimal project-standard Sphinx Makefile."""
+    return """# Minimal Sphinx Makefile
+.PHONY: html clean
+html:
+	+sphinx-build -b html . _build/html
+clean:
+	+rm -rf _build
+"""
+
+
+def _write_sphinx_skeleton(dest: Path, *, force: bool = False) -> list[Path]:
+    """Create or update a deploy-safe Sphinx documentation skeleton."""
+    dest = dest.expanduser().resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+    _ensure_sphinx_support_dirs(dest)
+
+    files = {
+        dest / "conf.py": _build_conf_py(),
+        dest / "index.rst": _build_index_rst(),
+        dest / "api.rst": _build_api_rst(),
+        dest / "Makefile": _build_makefile(),
+    }
+
+    written: list[Path] = []
+    for path, text in files.items():
+        if _write_if_needed(path, text, force=force):
+            written.append(path)
+    return written
+
+
+def _add_eq_opts(pp: argparse.ArgumentParser) -> None:
+    """Add equation-printing options shared by servoTool commands."""
+    pp.add_argument("--eq", action="store_true", help="Print one-liner equations.")
+    pp.add_argument("--eq-stdout", action="store_true", help="Send equations to stdout. Default is stderr.")
+    pp.add_argument("--eq-file", type=str, default=None, help="Write equations to this file. Overrides stdout/stderr.")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser."""
+    p = argparse.ArgumentParser(
+        prog="pole_placement.servoTool",
+        description="Servo-system design and simulation tool for Ogata Chapter 6 workflows.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    # example
+    s = sub.add_parser(
+        "example",
+        help="run Ogata Example 6-13 end-to-end",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    s.add_argument("--plot", action="store_true")
+    s.add_argument("--plotly", action="store_true")
+    s.add_argument("--html", type=str, default=None)
+    s.add_argument("--open", action="store_true")
+    s.add_argument("--savefig", type=str, default=None)
+    _add_eq_opts(s)
+
+    # design
+    s = sub.add_parser(
+        "design",
+        help="design K1 and K2",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    s.add_argument("--config", type=str, default=None)
+    s.add_argument("--G", type=str)
+    s.add_argument("--H", type=str)
+    s.add_argument("--C", type=str)
+    s.add_argument("--which", type=str, choices=["ogata", "aug"], default="ogata")
+    s.add_argument("--method", type=str, choices=["acker", "place", "acker_ct"], default="acker")
+    s.add_argument("--poles", type=str, default=None, help="e.g. '0,0,0,0' or '0.6,0.6,0.5,0.5'")
+    s.add_argument("--csv", type=str, default=None)
+    s.add_argument("--out", type=str, default=None)
+    _add_eq_opts(s)
+
+    # observer
+    s = sub.add_parser(
+        "observer",
+        help="design minimum-order observer in measured form",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    s.add_argument("--config", type=str, default=None)
+    s.add_argument("--G", type=str)
+    s.add_argument("--H", type=str)
+    s.add_argument("--C", type=str)
+    s.add_argument("--method", type=str, choices=["acker", "place", "acker_ct"], default="acker")
+    s.add_argument("--poles", type=str, default=None, help="'0,0' for deadbeat second order, etc.")
+    s.add_argument("--csv", type=str, default=None)
+    s.add_argument("--out", type=str, default=None)
+    s.add_argument("--observer-mode", type=str, choices=["current", "prediction"], default="current")
+    _add_eq_opts(s)
+
+    # sim
+    s = sub.add_parser(
+        "sim",
+        help="simulate u = -K2 x + K1 v",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    s.add_argument("--config", type=str, default=None)
+    s.add_argument("--G", type=str)
+    s.add_argument("--H", type=str)
+    s.add_argument("--C", type=str)
+    s.add_argument("--K1", type=str)
+    s.add_argument("--K2", type=str)
+    s.add_argument("--N", type=int, default=10)
+    s.add_argument("--ref", type=str, default="step")
+    s.add_argument("--use-observer", action="store_true")
+    s.add_argument("--observer-mode", type=str, choices=["current", "prediction"], default="current")
+    s.add_argument("--Ke", type=str, default=None)
+    s.add_argument("--T", type=str, default=None)
+    s.add_argument("--csv", type=str, default=None)
+    s.add_argument("--out", type=str, default=None)
+    s.add_argument("--plot", action="store_true")
+    s.add_argument("--savefig", type=str, default=None)
+    s.add_argument("--plotly", action="store_true")
+    s.add_argument("--html", type=str, default=None)
+    s.add_argument("--open", action="store_true")
+    _add_eq_opts(s)
+
+    # sphinx skeleton
+    skel = sub.add_parser(
+        "sphinx-skel",
+        help="create a deploy-safe Sphinx documentation skeleton for this package",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    skel.add_argument("dest", type=Path, help="Destination docs directory.")
+    skel.add_argument("--force", action="store_true", help="Overwrite existing Sphinx skeleton files.")
+
     return p
 
-def main():
-    parser = build_parser()
-    ns = parser.parse_args()
-    app = ServoApp()
 
+def _run_servo(ns: argparse.Namespace) -> object:
+    """Run the selected servoTool workflow and return the app result."""
     req = RunRequest(
         mode=ns.cmd,
-        config=getattr(ns, 'config', None),
-        G=getattr(ns, 'G', None), H=getattr(ns, 'H', None), C=getattr(ns, 'C', None),
-        which=getattr(ns, 'which', 'ogata'),
-        method=getattr(ns, 'method', 'acker'),
-        poles=getattr(ns, 'poles', None),
-        observer_mode=getattr(ns, 'observer_mode', 'current'),
-        K1=getattr(ns, 'K1', None), K2=getattr(ns, 'K2', None),
-        N=getattr(ns, 'N', 10), ref=getattr(ns, 'ref', 'step'),
-        use_observer=getattr(ns, 'use_observer', False),
-        Ke=getattr(ns, 'Ke', None), T=getattr(ns, 'T', None),
-        csv=getattr(ns, 'csv', None), out=getattr(ns, 'out', None),
-        plot=getattr(ns, 'plot', False), savefig=getattr(ns, 'savefig', None),
-        plotly=getattr(ns, 'plotly', False), html=getattr(ns, 'html', None), open_html=getattr(ns, 'open', False),
-        eq=getattr(ns, 'eq', False), eq_stdout=getattr(ns, 'eq_stdout', False), eq_file=getattr(ns, 'eq_file', None),
+        config=getattr(ns, "config", None),
+        G=getattr(ns, "G", None),
+        H=getattr(ns, "H", None),
+        C=getattr(ns, "C", None),
+        which=getattr(ns, "which", "ogata"),
+        method=getattr(ns, "method", "acker"),
+        poles=getattr(ns, "poles", None),
+        observer_mode=getattr(ns, "observer_mode", "current"),
+        K1=getattr(ns, "K1", None),
+        K2=getattr(ns, "K2", None),
+        N=getattr(ns, "N", 10),
+        ref=getattr(ns, "ref", "step"),
+        use_observer=getattr(ns, "use_observer", False),
+        Ke=getattr(ns, "Ke", None),
+        T=getattr(ns, "T", None),
+        csv=getattr(ns, "csv", None),
+        out=getattr(ns, "out", None),
+        plot=getattr(ns, "plot", False),
+        savefig=getattr(ns, "savefig", None),
+        plotly=getattr(ns, "plotly", False),
+        html=getattr(ns, "html", None),
+        open_html=getattr(ns, "open", False),
+        eq=getattr(ns, "eq", False),
+        eq_stdout=getattr(ns, "eq_stdout", False),
+        eq_file=getattr(ns, "eq_file", None),
     )
-    res = app.run(req)
-    print(json.dumps(res if isinstance(res, dict) else getattr(res, '__dict__', {'result': 'ok'}), indent=2))
 
-if __name__ == '__main__':
-    main()
+    app = ServoApp()
+    return app.run(req)
+
+
+def _json_ready(result: object) -> object:
+    """Return a JSON-serializable result matching the historical CLI behavior."""
+    if isinstance(result, dict):
+        return result
+    return getattr(result, "__dict__", {"result": "ok"})
+
+
+def _run_sphinx_skel(ns: argparse.Namespace) -> int:
+    """Generate the Sphinx documentation skeleton."""
+    written = _write_sphinx_skeleton(ns.dest, force=ns.force)
+
+    print(f"Sphinx skeleton ready: {ns.dest}")
+    if written:
+        print("Written files:")
+        for path in written:
+            print(f"  {path}")
+    else:
+        print("No existing files were overwritten. Use --force to regenerate.")
+
+    print("Support files ensured:")
+    print(f"  {ns.dest / '_static' / '.gitkeep'}")
+    print(f"  {ns.dest / '_templates' / '.gitkeep'}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the servoTool command-line interface."""
+    parser = build_parser()
+    ns = parser.parse_args(argv)
+
+    if ns.cmd == "sphinx-skel":
+        return _run_sphinx_skel(ns)
+
+    res = _run_servo(ns)
+    print(json.dumps(_json_ready(res), default=str, indent=2))
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

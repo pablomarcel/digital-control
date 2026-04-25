@@ -1,89 +1,309 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-CLI entry for the Kalman Filter tool
+CLI entry for the Kalman Filter tool.
 
-Works in two modes:
-  1) From project root (preferred):  python -m kalman_filters.kalmanFilterTool.cli --help
-  2) From inside this folder:        python cli.py --help
-     (import shim below handles absolute imports)
+This module supports three usage styles:
 
-Default I/O when running *inside* kalmanFilterTool/:
-  * Inputs : ./in
-  * Outputs: ./out
+1. Preferred package execution from the repository root::
+
+       python -m kalman_filters.kalmanFilterTool.cli run --help
+
+2. Historical no-subcommand usage from the package folder::
+
+       python cli.py --help
+       python cli.py --dt 0.05 --T 10 --backend both
+
+3. Sphinx documentation skeleton generation::
+
+       python -m kalman_filters.kalmanFilterTool.cli sphinx-skel docs --force
+
+The Sphinx helper intentionally writes conservative, deploy-safe files for
+GitHub Pages builds.
 """
 from __future__ import annotations
 
+import argparse
+import importlib
+import os
+import sys
+from pathlib import Path
+from typing import Iterable
+
 # ---------- Import shim so `python cli.py` works with absolute imports ----------
 if __package__ in (None, ""):
-    # Running as a script: add project root to sys.path and import absolute modules
-    import os, sys
+    # Running as a script: add project root to sys.path and import absolute modules.
     pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     if pkg_root not in sys.path:
         sys.path.insert(0, pkg_root)
+
     from kalman_filters.kalmanFilterTool.apis import RunRequest
     from kalman_filters.kalmanFilterTool.app import KalmanFilterApp
     from kalman_filters.kalmanFilterTool.io import parse_matrix, parse_vector
 else:
-    # Normal package execution
     from .apis import RunRequest
     from .app import KalmanFilterApp
     from .io import parse_matrix, parse_vector
 
-import argparse
 
-_INSIDE_PACKAGE = (__package__ in (None, ""))
+_PACKAGE = "kalman_filters.kalmanFilterTool"
+_PROJECT = "digital-control - kalman_filters.kalmanFilterTool"
+_AUTHOR = "digital-control"
+_INSIDE_PACKAGE = __package__ in (None, "")
+
+_REQUIRED_MODULES = [
+    "kalman_filters.kalmanFilterTool.cli",
+    "kalman_filters.kalmanFilterTool.apis",
+    "kalman_filters.kalmanFilterTool.io",
+]
+_OPTIONAL_MODULES = [
+    "kalman_filters.kalmanFilterTool.app",
+    "kalman_filters.kalmanFilterTool.core",
+    "kalman_filters.kalmanFilterTool.design",
+    "kalman_filters.kalmanFilterTool.plotting",
+    "kalman_filters.kalmanFilterTool.utils",
+]
+
+# Common plotting/scientific packages that may not be installed in the lean
+# GitHub Pages environment. Mocking them keeps autodoc focused on project docs.
+_AUTODOC_MOCK_IMPORTS = [
+    "matplotlib",
+    "matplotlib.pyplot",
+    "plotly",
+    "plotly.graph_objects",
+    "scipy",
+]
+
 
 def _default_in_dir() -> str:
+    """Return the default input directory for the current execution mode."""
     return "in" if _INSIDE_PACKAGE else "kalman_filters/kalmanFilterTool/in"
 
+
 def _default_out_dir() -> str:
+    """Return the default output directory for the current execution mode."""
     return "out" if _INSIDE_PACKAGE else "kalman_filters/kalmanFilterTool/out"
 
-def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(
-        prog="kalman_filters.kalmanFilterTool" if not _INSIDE_PACKAGE else "kalmanFilterTool.cli",
-        description="Discrete Kalman filter simulation (time-varying or steady-state) — OOP module",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        allow_abbrev=False,
+
+def _module_importable(module_name: str) -> bool:
+    """Return True only when a module can be imported by Python.
+
+    ``importlib.util.find_spec`` can report that a module exists even when the
+    module fails during import because an optional dependency is missing. Sphinx
+    autodoc then fails later. This stricter check mirrors autodoc behavior.
+    """
+    try:
+        importlib.import_module(module_name)
+    except Exception:
+        return False
+    return True
+
+
+def _available_modules() -> list[str]:
+    """Return only project modules that Python can actually import."""
+    modules: list[str] = []
+    for mod in [*_REQUIRED_MODULES, *_OPTIONAL_MODULES]:
+        if _module_importable(mod):
+            modules.append(mod)
+    return modules
+
+
+def _rst_heading(text: str, underline: str = "=") -> str:
+    """Return a reStructuredText heading with a matching underline length."""
+    return f"{text}\n{underline * len(text)}\n\n"
+
+
+def _write_if_needed(path: Path, text: str, *, force: bool = False) -> bool:
+    """Write text unless the file already exists and overwrite is disabled."""
+    if path.exists() and not force:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
+def _ensure_sphinx_support_dirs(dest: Path) -> None:
+    """Create Sphinx support folders and tracked placeholder files."""
+    for dirname in ("_templates", "_static"):
+        folder = dest / dirname
+        folder.mkdir(parents=True, exist_ok=True)
+        gitkeep = folder / ".gitkeep"
+        if not gitkeep.exists():
+            gitkeep.write_text("", encoding="utf-8")
+
+
+def _build_conf_py() -> str:
+    """Build a conservative Sphinx configuration file."""
+    return f'''# Generated by {_PACKAGE}.cli
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# docs -> kalmanFilterTool -> kalman_filters -> repository root
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
+
+project = {_PROJECT!r}
+author = {_AUTHOR!r}
+
+extensions = [
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.viewcode",
+]
+
+templates_path = ["_templates"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+html_theme = "furo"
+html_static_path = ["_static"]
+
+autodoc_typehints = "description"
+autodoc_mock_imports = {_AUTODOC_MOCK_IMPORTS!r}
+napoleon_google_docstring = True
+napoleon_numpy_docstring = True
+'''
+
+
+def _build_index_rst() -> str:
+    """Build a Sphinx index page with safe heading lengths."""
+    title = f"Welcome to {_PACKAGE}'s documentation"
+    return (
+        f".. {_PACKAGE} documentation master file\n\n"
+        + _rst_heading(title, "=")
+        + ".. toctree::\n"
+        + "   :maxdepth: 2\n"
+        + "   :caption: Contents:\n\n"
+        + "   api\n"
     )
-    # High-level CV defaults
+
+
+def _build_api_rst() -> str:
+    """Build an API page that documents only importable modules."""
+    parts: list[str] = [_rst_heading("API Reference", "=")]
+    for mod in _available_modules():
+        parts.append(_rst_heading(mod, "-"))
+        parts.append(f".. automodule:: {mod}\n")
+        parts.append("   :members:\n")
+        parts.append("   :undoc-members:\n")
+        parts.append("   :show-inheritance:\n\n")
+    return "".join(parts)
+
+
+def _build_makefile() -> str:
+    """Build the minimal project-standard Sphinx Makefile."""
+    return """# Minimal Sphinx Makefile
+.PHONY: html clean
+html:
+	+sphinx-build -b html . _build/html
+clean:
+	+rm -rf _build
+"""
+
+
+def _write_sphinx_skeleton(dest: Path, *, force: bool = False) -> list[Path]:
+    """Create or update a deploy-safe Sphinx documentation skeleton."""
+    dest = dest.expanduser().resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+    _ensure_sphinx_support_dirs(dest)
+
+    files = {
+        dest / "conf.py": _build_conf_py(),
+        dest / "index.rst": _build_index_rst(),
+        dest / "api.rst": _build_api_rst(),
+        dest / "Makefile": _build_makefile(),
+    }
+
+    written: list[Path] = []
+    for path, text in files.items():
+        if _write_if_needed(path, text, force=force):
+            written.append(path)
+    return written
+
+
+def _add_run_arguments(ap: argparse.ArgumentParser) -> None:
+    """Add the original Kalman-filter simulation arguments to a parser."""
+    # High-level constant-velocity defaults.
     ap.add_argument("--dt", type=float, default=0.05, help="Sample time (s)")
-    ap.add_argument("--T",  type=float, default=10.0, help="Simulation duration (s)")
-    ap.add_argument("--q",  type=float, default=0.25, help="Accel noise intensity (CV model)")
-    ap.add_argument("--r",  type=float, default=4.0,   help="Measurement noise variance (CV model)")
-    ap.add_argument("--u",  type=float, default=0.0,   help="Constant input acceleration")
-    # Overrides
+    ap.add_argument("--T", type=float, default=10.0, help="Simulation duration (s)")
+    ap.add_argument("--q", type=float, default=0.25, help="Accel noise intensity (CV model)")
+    ap.add_argument("--r", type=float, default=4.0, help="Measurement noise variance (CV model)")
+    ap.add_argument("--u", type=float, default=0.0, help="Constant input acceleration")
+
+    # Model overrides.
     ap.add_argument("--A", help='Override A, e.g. "1 0.05; 0 1"')
     ap.add_argument("--B", help='Override B, e.g. "0.00125; 0.05"')
     ap.add_argument("--C", help='Override C, e.g. "1 0" or "1 0; 0 1"')
-    ap.add_argument("--G", help='Override G, process noise input matrix (n×m)')
-    ap.add_argument("--Q", help='Override Q: n×n (state-form) or m×m (input-form with G)')
-    ap.add_argument("--R", help='Override R (p×p); scalar expands to p×p*scalar')
-    # Initials
-    ap.add_argument("--x0",  default="0 0", help='Initial state estimate x0 (column)')
-    ap.add_argument("--P0",  default="100 0; 0 100", help='Initial covariance P0')
-    ap.add_argument("--xtrue0", default="0 0", help='True initial state (for sim)')
-    # Flags
+    ap.add_argument("--G", help="Override G, process noise input matrix (n×m)")
+    ap.add_argument("--Q", help="Override Q: n×n (state-form) or m×m (input-form with G)")
+    ap.add_argument("--R", help="Override R (p×p); scalar expands to p×p*scalar")
+
+    # Initial conditions.
+    ap.add_argument("--x0", default="0 0", help="Initial state estimate x0 (column)")
+    ap.add_argument("--P0", default="100 0; 0 100", help="Initial covariance P0")
+    ap.add_argument("--xtrue0", default="0 0", help="True initial state (for sim)")
+
+    # Flags and outputs.
     ap.add_argument("--steady", action="store_true", help="Use steady-state KF (DARE)")
     ap.add_argument("--seed", type=int, default=1, help="Random seed")
-    ap.add_argument("--backend", choices=["mpl","plotly","both","none"], default="both", help="Plotting backend(s)")
-    # Outputs
-    ap.add_argument("--save_csv",  default=None, help="CSV filename")
-    ap.add_argument("--save_png",  default=None, help="PNG filename (MPL)")
+    ap.add_argument(
+        "--backend",
+        choices=["mpl", "plotly", "both", "none"],
+        default="both",
+        help="Plotting backend(s)",
+    )
+    ap.add_argument("--save_csv", default=None, help="CSV filename")
+    ap.add_argument("--save_png", default=None, help="PNG filename (MPL)")
     ap.add_argument("--save_html", default=None, help="HTML filename (Plotly)")
     ap.add_argument("--no_show", action="store_true", help="Do not open plot windows (MPL)")
-    # Directories
-    ap.add_argument("--in-dir",  default=_default_in_dir(),  help="Default input directory")
-    ap.add_argument("--out-dir", default=_default_out_dir(), help="Output directory for relative filenames")
-    return ap
 
-def main(argv=None):
-    ap = build_parser()
-    args = ap.parse_args(argv)
-    req = RunRequest(
-        dt=args.dt, T=args.T, q=args.q, r=args.r, u=args.u,
-        steady=args.steady, seed=args.seed, backend=args.backend,
+    # Directories.
+    ap.add_argument("--in-dir", default=_default_in_dir(), help="Default input directory")
+    ap.add_argument("--out-dir", default=_default_out_dir(), help="Output directory for relative filenames")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser."""
+    parser = argparse.ArgumentParser(
+        prog=_PACKAGE if not _INSIDE_PACKAGE else "kalmanFilterTool.cli",
+        description="Discrete Kalman filter simulation (time-varying or steady-state).",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    sub = parser.add_subparsers(dest="cmd")
+
+    run = sub.add_parser(
+        "run",
+        help="run Kalman-filter simulation",
+        description="Run a discrete Kalman-filter simulation with optional model overrides.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    _add_run_arguments(run)
+
+    skel = sub.add_parser(
+        "sphinx-skel",
+        help="create a deploy-safe Sphinx documentation skeleton for this package",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    skel.add_argument("dest", type=Path, help="Destination docs directory.")
+    skel.add_argument("--force", action="store_true", help="Overwrite existing Sphinx skeleton files.")
+
+    return parser
+
+
+def _build_request(args: argparse.Namespace) -> RunRequest:
+    """Create a RunRequest from parsed CLI arguments."""
+    return RunRequest(
+        dt=args.dt,
+        T=args.T,
+        q=args.q,
+        r=args.r,
+        u=args.u,
+        steady=args.steady,
+        seed=args.seed,
+        backend=args.backend,
         A=(parse_matrix(args.A) if args.A is not None else None),
         B=(parse_matrix(args.B) if args.B is not None else None),
         C=(parse_matrix(args.C) if args.C is not None else None),
@@ -93,10 +313,65 @@ def main(argv=None):
         x0=parse_vector(args.x0),
         P0=parse_matrix(args.P0),
         xtrue0=parse_vector(args.xtrue0),
-        save_csv=args.save_csv, save_png=args.save_png, save_html=args.save_html,
-        no_show=args.no_show, in_dir=args.in_dir, out_dir=args.out_dir
+        save_csv=args.save_csv,
+        save_png=args.save_png,
+        save_html=args.save_html,
+        no_show=args.no_show,
+        in_dir=args.in_dir,
+        out_dir=args.out_dir,
     )
-    KalmanFilterApp().build_and_run(req)
 
-if __name__ == "__main__":
-    main()
+
+def _run_kalman(args: argparse.Namespace) -> int:
+    """Run the Kalman-filter workflow."""
+    req = _build_request(args)
+    KalmanFilterApp().build_and_run(req)
+    return 0
+
+
+def _run_sphinx_skel(args: argparse.Namespace) -> int:
+    """Generate the Sphinx documentation skeleton."""
+    written = _write_sphinx_skeleton(args.dest, force=args.force)
+    print(f"Sphinx skeleton ready: {args.dest}")
+    if written:
+        print("Written files:")
+        for path in written:
+            print(f"  {path}")
+    else:
+        print("No existing files were overwritten. Use --force to regenerate.")
+    print("Support files ensured:")
+    print(f"  {args.dest / '_static' / '.gitkeep'}")
+    print(f"  {args.dest / '_templates' / '.gitkeep'}")
+    return 0
+
+
+def _is_legacy_run(argv: Iterable[str]) -> bool:
+    """Return True when argv looks like historical no-subcommand usage."""
+    args = list(argv)
+    if not args:
+        return False
+    return args[0] not in {"run", "sphinx-skel", "-h", "--help"}
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the kalmanFilterTool command-line interface."""
+    parser = build_parser()
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+
+    if _is_legacy_run(raw_args):
+        raw_args = ["run", *raw_args]
+
+    args = parser.parse_args(raw_args)
+
+    if args.cmd == "sphinx-skel":
+        return _run_sphinx_skel(args)
+
+    if args.cmd == "run":
+        return _run_kalman(args)
+
+    parser.print_help()
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
