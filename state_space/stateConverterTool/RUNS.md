@@ -160,3 +160,10 @@ pytest state_space/stateConverterTool/tests --override-ini addopts= --cov --cov-
 - Prefer `--evalf` when all inputs are numeric for dramatic speedups (no heavy symbolic simplification).
 - Use `--no-simplify` during design sweeps; re‑enable for final nice forms.
 - For SISO, `F(z)` prints as a scalar; for MIMO, you’ll get a matrix of rational entries.
+
+### Sphinx
+
+python -m quadratic_control.quadraticTool.cli sphinx-skel quadratic_control/quadraticTool/docs
+python -m sphinx -b html docs docs/_build/html
+open docs/_build/html/index.html
+sphinx-autobuild docs docs/_build/html

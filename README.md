@@ -3,31 +3,31 @@
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-3D74F7.svg)](https://pablomarcel.github.io/control-digitalControl/)
 [![Build & Publish Docs](https://github.com/pablomarcel/control-digitalControl/actions/workflows/pages.yml/badge.svg)](https://github.com/pablomarcel/control-digitalControl/actions/workflows/pages.yml)
 
-Digital Control is a Python-based collection of command-line tools for studying, simulating, and designing discrete-time control systems. The project focuses on reproducible engineering workflows inspired by standard digital-control topics, including z-transforms, z-plane analysis, state-space methods, pole placement, observers, Kalman filtering, RST controllers, LQR, Jury stability, zero-order hold behavior, ADC/DAC models, and related digital-system utilities.
+**Digital Control** is a Python-first engineering toolkit for studying, simulating, and designing discrete-time control systems through reproducible command-line workflows. It collects focused tools for z-transforms, z-plane analysis, sampled-data behavior, state-space simulation, pole placement, observers, Kalman filtering, RST control, LQR, Jury stability, ADC/DAC modeling, VCD utilities, and supporting digital-system analysis.
 
-The repository is organized as a set of focused packages. Each tool provides a command-line interface, example inputs, repeatable run commands, and file-based outputs so that analyses can be reproduced without relying on notebooks or proprietary desktop software.
+The project is organized as a set of small, topic-specific packages instead of a single monolithic application. Each package is intended to be inspectable, testable, and repeatable: inputs live in files, commands are documented, and generated artifacts are written to package-level output folders. The result is a practical environment for learning, verification, and exploratory control-system design without depending on notebooks or proprietary desktop tools.
 
 ## Documentation
 
-Live documentation is available here:
+Live documentation is published with GitHub Pages:
 
 **https://pablomarcel.github.io/control-digitalControl/**
 
-Per-package documentation begins with:
+Package documentation starts here:
 
 - [intro/adcTool](https://pablomarcel.github.io/control-digitalControl/intro/adcTool)
 
-## Project Goals
+## What This Repository Provides
 
-Digital Control is intended to serve as a practical study and design environment for discrete-time control systems. The main goals are:
+Digital Control is built around repeatable engineering workflows. The repository is designed to help users:
 
-- provide small, testable tools for individual digital-control topics;
-- keep workflows reproducible through command-line execution and file-based inputs;
-- generate useful engineering artifacts such as JSON, CSV, HTML, PNG, and VCD outputs;
-- make textbook-style computations easier to inspect, repeat, and extend;
-- support both learning workflows and exploratory design studies.
+- analyze discrete-time systems from transfer-function, polynomial, and state-space viewpoints;
+- simulate sampled-data behavior, digital responses, converters, timing traces, and controller behavior;
+- design and inspect control structures such as pole-placement controllers, observers, RST controllers, Kalman filters, servo systems, and LQR regulators;
+- generate structured outputs for review, documentation, regression testing, and future automation;
+- keep examples reproducible through command-line execution, package-level `RUNS.md` files, and file-based input/output conventions.
 
-## Repository Structure
+## Repository Layout
 
 ```text
 intro/
@@ -35,11 +35,11 @@ intro/
   dacTool/                # DAC staircase and quantization models
   demuxTool/              # N-way digital demultiplexer models
   muxTool/                # N-way digital multiplexer models
-  vcdTool/                # VCD validation, merge, and summary helpers
+  vcdTool/                # VCD validation, merge, and summary utilities
   zohTool/                # Zero-order hold and droop models
 
 kalmanFilters/
-  kalmanFilterTool/       # Discrete Kalman filtering
+  kalmanFilterTool/       # Discrete Kalman filtering workflows
 
 polePlacement/
   controllabilityTool/    # Controllability tests, rank checks, and Gramians
@@ -71,49 +71,60 @@ systemDesign/
   zGridTool/              # z-plane design grids and overlays
 
 zPlaneAnalysis/
-  discreteResponseTool/   # Discrete impulse and step response analysis
+  discreteResponseTool/   # Discrete impulse and step-response analysis
 
 zTransform/
   zTransformTool/         # Z-transform, inverse Z-transform, and difference equations
 ```
 
-Most packages include:
+Most tools follow the same package pattern:
 
-- `cli.py` for command-line execution;
-- `apis.py`, `core.py`, `app.py`, `io.py`, or similar modules for structured implementation;
-- `in/` for example inputs;
-- `out/` for generated outputs;
-- `RUNS.md` with copy-paste command examples;
-- `tests/` for package-level validation.
+```text
+cli.py        command-line entry point
+apis.py       public-facing solver/API layer, when applicable
+app.py        orchestration layer, when applicable
+core.py       numerical methods and domain logic
+io.py         file loading, validation, and output writing
+in/           example input files
+out/          generated results
+RUNS.md       tested copy-paste command examples
+tests/        package-level regression tests
+```
 
-## Design Principles
+The exact module names vary by package, but the intent is consistent: keep solver logic separated from command-line parsing, keep examples close to the tool that uses them, and keep generated outputs easy to inspect.
 
-### CLI-first workflow
+## Design Philosophy
 
-The tools are designed to be run from the terminal. Important options are exposed as command-line flags, and package-specific examples are documented in `RUNS.md` files.
+### CLI-first engineering workflow
+
+The repository is optimized for terminal-driven work. A typical tool exposes its main behavior through `cli.py`, with examples documented in its package-level `RUNS.md`. This makes each analysis easy to rerun, compare, script, and capture in version control.
 
 ### Reproducible inputs and outputs
 
-Inputs are stored in package-level `in/` folders. Outputs are written to `out/` folders. This keeps each example easy to rerun, compare, and archive.
+Examples are stored under `in/` folders and generated artifacts are written to `out/` folders. This convention keeps the workflow explicit: the input file defines the problem, the command defines the execution path, and the output files capture the result.
 
-### Small packages with focused responsibilities
+### Focused packages instead of a monolith
 
-Each tool targets a specific topic rather than trying to be a monolithic control-systems application. This makes the code easier to test, debug, and extend.
+Each package addresses a specific digital-control topic. This keeps implementations smaller, easier to reason about, and easier to extend without breaking unrelated tools.
 
-### Open Python stack
+### Structured numerical artifacts
 
-The project uses the Python scientific-computing ecosystem, including NumPy, SciPy, SymPy, Matplotlib, Plotly, python-control, PyRTL, and related packages where appropriate.
+Outputs are designed to be useful beyond the terminal. Depending on the package, generated artifacts may include JSON result packs, CSV data exports, PNG plots, interactive HTML visualizations, and VCD timing traces.
 
-### Testable engineering calculations
+### Open Python ecosystem
 
-The project emphasizes repeatable numerical workflows. Tests are included at the package level to support refactoring and to protect existing behavior.
+The project builds on the scientific Python stack where appropriate, including NumPy, SciPy, SymPy, Matplotlib, Plotly, python-control, PyRTL, pytest, Sphinx, and Furo.
+
+### Testable calculations
+
+The repository treats numerical behavior as something that should be checked, not guessed. Package-level tests support refactoring, protect existing behavior, and provide confidence that examples remain reproducible as tools evolve.
 
 ## Quick Start
 
 ```bash
 # Clone the repository
 git clone https://github.com/pablomarcel/control-digitalControl.git
-cd digitalControl
+cd control-digitalControl
 
 # Create and activate a virtual environment
 python -m venv .venv
@@ -127,86 +138,89 @@ pip install -r requirements.txt
 Run a package-level command:
 
 ```bash
-cd system_design/zGridTool
+cd systemDesign/zGridTool
 python cli.py --help
 ```
 
-Then open the package's `RUNS.md` file for tested example commands.
+Then open that package's `RUNS.md` file for tested example commands.
 
-## Example Workflow
+## Typical Workflow
 
-A typical workflow is:
+A normal package workflow looks like this:
 
 ```bash
-cd system_design/zGridTool
+cd systemDesign/zGridTool
 python cli.py --help
-# choose a command from RUNS.md
-# review generated outputs in out/
+# choose a tested command from RUNS.md
+# run the example
+# review generated files in out/
 ```
 
-For tools that support plotting, outputs may include static Matplotlib images or interactive Plotly HTML files. Tools that model digital logic or converter timing may also emit VCD traces.
+For packages with plotting support, outputs may include static Matplotlib figures or interactive Plotly HTML files. Tools that model digital timing behavior may also emit VCD traces for inspection in waveform viewers.
 
 ## Input and Output Conventions
 
-Common conventions across the repository:
+Common package-level conventions:
 
 ```text
-in/      example inputs such as JSON, CSV, YAML, or VCD files
-out/     generated outputs such as JSON, CSV, PNG, HTML, or VCD files
-RUNS.md  reproducible command examples for the package
+in/      input files such as JSON, CSV, YAML, TXT, or VCD
+out/     generated outputs such as JSON, CSV, PNG, HTML, or VCD
+RUNS.md  tested command examples for the package
 ```
 
-Common output types include:
+Common output types:
 
-- JSON result packs for structured numerical output;
-- CSV exports for matrices, roots, time histories, and frequency-response data;
-- PNG figures for reports and documentation;
-- interactive HTML plots for visual inspection;
-- VCD files for digital timing traces where applicable.
+- **JSON** result packs for structured numerical output;
+- **CSV** exports for matrices, roots, time histories, frequency-response data, or tabular summaries;
+- **PNG** figures for documentation and reports;
+- **HTML** files for interactive visual inspection;
+- **VCD** files for digital timing traces and waveform analysis.
 
 ## Testing
 
-Run tests for an individual tool from the repository root. For example:
-
-```bash
-pytest system_design/zGridTool/tests \
-  --cov \
-  --cov-config=system_design/zGridTool/.coveragerc \
-  --cov-report=term-missing
-```
-
-To run all available tests:
+Run all available tests from the repository root:
 
 ```bash
 pytest
 ```
 
-## Development Notes
+Run tests for an individual package:
 
-The repository uses a package-per-tool structure. When adding or modifying a tool:
+```bash
+pytest systemDesign/zGridTool/tests \
+  --cov \
+  --cov-config=systemDesign/zGridTool/.coveragerc \
+  --cov-report=term-missing
+```
 
-- keep the command-line interface clear and documented;
-- keep example inputs under `in/`;
-- write generated files under `out/`;
-- update `RUNS.md` with reproducible commands;
-- add tests for new solver paths or important behavior changes;
-- prefer structured dataclasses or clear schemas for inputs and outputs.
+Because this repository is organized as independent tools, package-level testing is especially useful when modifying a solver, adding a command, or changing output formatting.
 
 ## Documentation Build
 
-The project includes GitHub Pages documentation generated from package-level Sphinx projects. The documentation workflow builds the generated documentation and publishes it to the project Pages site.
-
-Local documentation builds may be run from individual docs folders when needed:
+The repository includes Sphinx-based documentation published through GitHub Pages. Local documentation builds may be run from the relevant documentation folder:
 
 ```bash
 sphinx-build -b html path/to/docs path/to/docs/_build/html
 ```
 
+When updating a package, keep its CLI help, examples, and documentation aligned so that command behavior remains discoverable.
+
+## Development Guidelines
+
+When adding or modifying a tool:
+
+- keep command-line behavior clear and documented;
+- preserve the package-level `in/`, `out/`, and `RUNS.md` workflow;
+- keep numerical logic in dedicated solver/core modules rather than burying it in CLI code;
+- add or update example inputs for new solver paths;
+- write tests for new calculations, edge cases, and regression-sensitive behavior;
+- prefer structured outputs that can be inspected programmatically;
+- avoid hidden state and make file paths explicit;
+- update documentation when flags, examples, or output conventions change.
+
 ## Requirements
 
-The project is developed against modern Python versions and the scientific Python ecosystem. See `requirements.txt` for pinned dependencies.
-
-Typical dependencies include:
+See `requirements.txt` for the project dependency set. Typical dependencies include:
 
 - NumPy
 - SciPy
@@ -216,19 +230,21 @@ Typical dependencies include:
 - python-control
 - PyRTL
 - pytest
-- Sphinx and Furo for documentation
+- Sphinx
+- Furo
 
 ## Contributing
 
-Contributions are welcome. Good contributions are small, reproducible, and tested.
+Contributions are welcome when they are focused, reproducible, and tested. A strong contribution should include the relevant input examples, updated command documentation, and tests that demonstrate the expected behavior.
 
 Before opening a pull request:
 
-- run the relevant package tests;
+- run the affected package tests;
+- run broader tests when shared utilities are modified;
 - update `RUNS.md` if command behavior changed;
 - document new CLI flags in `--help` text;
-- include or update example inputs when adding solver paths;
-- verify that generated outputs are written to the expected `out/` folder.
+- include or update example input files when adding solver paths;
+- verify that generated files are written to the expected `out/` folder.
 
 ## License
 
@@ -236,4 +252,4 @@ This project is released under the MIT License. See `LICENSE` for details.
 
 ## Acknowledgments
 
-This project is informed by standard digital-control coursework and references, especially K. Ogata's *Discrete-Time Control Systems*, along with the broader Python open-source scientific-computing ecosystem.
+This project is informed by standard digital-control coursework and references, especially K. Ogata's *Discrete-Time Control Systems*, and by the broader Python scientific-computing ecosystem.
