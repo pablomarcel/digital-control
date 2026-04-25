@@ -204,7 +204,7 @@ python cli.py modelmatch \
 
 ### Sphinx
 
-python -m transient_analysis.hurwitzTool.cli sphinx-skel transient_analysis/hurwitzTool/docs
+python -m polynomial_equations.polynomialTool.cli sphinx-skel polynomial_equations/polynomialTool/docs
 python -m sphinx -b html docs docs/_build/html
 open docs/_build/html/index.html
 sphinx-autobuild docs docs/_build/html

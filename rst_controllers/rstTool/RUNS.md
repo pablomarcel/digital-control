@@ -171,7 +171,7 @@ Both forms are supported by the import shim in `cli.py`.
 
 ### Sphinx
 
-python -m quadratic_control.quadraticTool.cli sphinx-skel quadratic_control/quadraticTool/docs
+python -m rst_controllers.rstTool.cli sphinx-skel rst_controllers/rstTool/docs
 python -m sphinx -b html docs docs/_build/html
 open docs/_build/html/index.html
 sphinx-autobuild docs docs/_build/html

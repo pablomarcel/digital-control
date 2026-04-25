@@ -60,7 +60,7 @@ python tools/class_diagram.py
 
 ### Sphinx
 
-python -m quadratic_control.quadraticTool.cli sphinx-skel quadratic_control/quadraticTool/docs
+python -m state_space.liapunovTool.cli sphinx-skel state_space/liapunovTool/docs
 python -m sphinx -b html docs docs/_build/html
 open docs/_build/html/index.html
 sphinx-autobuild docs docs/_build/html
