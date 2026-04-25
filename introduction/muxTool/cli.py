@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import importlib
 import os
 import sys
 from pathlib import Path
+from typing import Sequence
 
 # ---------- Import shim so `python cli.py` works with absolute imports ----------
 if __package__ in (None, ""):
@@ -37,13 +38,23 @@ _OPTIONAL_MODULES = [
     "introduction.muxTool.utils",
     "introduction.muxTool.plotting",
 ]
+_MOCK_IMPORTS = ["pyrtl", "graphviz"]
+
+
+def _can_import_module(mod: str) -> bool:
+    """Return true only when a module can be imported successfully."""
+    try:
+        importlib.import_module(mod)
+    except Exception:
+        return False
+    return True
 
 
 def _available_modules() -> list[str]:
     """Return only modules that Python can actually import."""
-    modules = list(_REQUIRED_MODULES)
-    for mod in _OPTIONAL_MODULES:
-        if importlib.util.find_spec(mod) is not None:
+    modules: list[str] = []
+    for mod in [*_REQUIRED_MODULES, *_OPTIONAL_MODULES]:
+        if _can_import_module(mod):
             modules.append(mod)
     return modules
 
@@ -99,6 +110,7 @@ html_theme = "furo"
 html_static_path = ["_static"]
 
 autodoc_typehints = "description"
+autodoc_mock_imports = {_MOCK_IMPORTS!r}
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
 '''
@@ -188,7 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser."""
     parser = argparse.ArgumentParser(
         prog=_PACKAGE,
-        description="introduction.muxTool — 4:1 multiplexer (PyRTL)",
+        description="introduction.muxTool — 4:1 multiplexer simulator",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     sub = parser.add_subparsers(dest="cmd")
@@ -256,21 +268,12 @@ def _run_sphinx_skel(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Run the muxTool command-line interface."""
-    parser = build_parser()
+def _dispatch_with_parser(parser: argparse.ArgumentParser, argv: Sequence[str] | None) -> int:
+    """Parse arguments and dispatch the selected command."""
     args = parser.parse_args(argv)
 
     if args.cmd == "sphinx-skel":
         return _run_sphinx_skel(args)
-
-    if args.cmd is None:
-        legacy_args = list(sys.argv[1:] if argv is None else argv)
-        if legacy_args and legacy_args[0] not in {"run", "sphinx-skel", "-h", "--help"}:
-            args = parser.parse_args(["run", *legacy_args])
-        else:
-            parser.print_help()
-            return 0
 
     if args.cmd == "run":
         try:
@@ -281,6 +284,17 @@ def main(argv: list[str] | None = None) -> int:
 
     parser.print_help()
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the muxTool command-line interface."""
+    parser = build_parser()
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+
+    if raw_args and raw_args[0] not in {"run", "sphinx-skel", "-h", "--help"}:
+        raw_args = ["run", *raw_args]
+
+    return _dispatch_with_parser(parser, raw_args)
 
 
 if __name__ == "__main__":  # pragma: no cover
