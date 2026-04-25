@@ -22,7 +22,12 @@ u
 
 Run:
 ```bash
-python cli.py --csv u.csv --Ts 1e-3 --units V --trace zoh.vcd --out zoh_results.csv
+python cli.py \
+  --csv u.csv \
+  --Ts 1e-3 \
+  --units V \
+  --trace zoh.vcd \
+  --out zoh_results.csv
 ```
 
 Outputs:
@@ -33,22 +38,39 @@ out/zoh_results.csv
 
 ## 2) JSON inline (quick test)
 ```bash
-python cli.py --json '[0, 2, 2, 1, 3, 0.5]' --Ts 5e-4 --units V --trace zoh.vcd
+python cli.py \
+  --json '[0, 2, 2, 1, 3, 0.5]' \
+  --Ts 5e-4 \
+  --units V \
+  --trace zoh.vcd
 ```
 
 ## 3) Include transport delay (actuator latency)
 ```bash
-python cli.py --csv u.csv --Ts 1e-3 --delay 2e-4 --trace zoh_delay.vcd
+python cli.py \
+  --csv u.csv \
+  --Ts 1e-3 \
+  --delay 2e-4 \
+  --trace zoh_delay.vcd
 ```
 
 ## 4) Model hold droop (capacitor leakage) with time constant τ
 ```bash
-python cli.py --csv u.csv --Ts 1e-3 --droop-tau 0.02 --trace zoh_droop.vcd
+python cli.py \
+  --csv u.csv \
+  --Ts 1e-3 \
+  --droop-tau 0.02 \
+  --trace zoh_droop.vcd
 ```
 
 ## 5) Change value scaling (e.g., store millivolts instead of microvolts)
 ```bash
-python cli.py --csv u.csv --Ts 1e-3 --scale 1e3 --units V --trace zoh_mV.vcd
+python cli.py \
+  --csv u.csv \
+  --Ts 1e-3 \
+  --scale 1e3 \
+  --units V \
+  --trace zoh_mV.vcd
 ```
 
 ## 6) CSV with explicit sample indices
@@ -64,5 +86,16 @@ k,u
 
 Run:
 ```bash
-python cli.py --csv u_k.csv --Ts 2e-3 --units V --trace zoh_sparse.vcd
+python cli.py \
+  --csv u_k.csv \
+  --Ts 2e-3 \
+  --units V \
+  --trace zoh_sparse.vcd
 ```
+
+### Sphinx
+
+python -m transient_analysis.hurwitzTool.cli sphinx-skel transient_analysis/hurwitzTool/docs
+python -m sphinx -b html docs docs/_build/html
+open docs/_build/html/index.html
+sphinx-autobuild docs docs/_build/html

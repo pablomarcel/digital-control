@@ -126,3 +126,10 @@ python cli.py in/*.csv --no-overlay --backend mpl --dpi 200
 # From digitalControl/ (note the explicit in/ paths)
 python -m rst_controllers.rstPlotTool.cli rst_controllers/rstPlotTool/in/rst.csv
 ```
+
+### Sphinx
+
+python -m rst_controllers.rstPlotTool.cli sphinx-skel rst_controllers/rstPlotTool/docs
+python -m sphinx -b html docs docs/_build/html
+open docs/_build/html/index.html
+sphinx-autobuild docs docs/_build/html

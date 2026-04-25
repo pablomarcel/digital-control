@@ -13,21 +13,26 @@ python cli.py --help
 ```bash
 python cli.py mux.vcd \
   --signals sel,d0,d1,d2,d3,y \
-  --out-csv mux_traces.csv --png mux.png
+  --out-csv mux_traces.csv \
+  --png mux.png
 ```
 
 ### DEMUX
 ```bash
 python cli.py demux.vcd \
   --signals sel,x,y0,y1,y2,y3 \
-  --out-csv demux_traces.csv --backend plotly --html demux.html
+  --out-csv demux_traces.csv \
+  --backend plotly \
+  --html demux.html
 ```
 
 ### COUNTER (decode 10-bit bus)
 ```bash
 python cli.py counter.vcd \
-  --signals clk,cmp,code --decode code:10 \
-  --backend plotly --html counter.html
+  --signals clk,cmp,code \
+  --decode code:10 \
+  --backend plotly \
+  --html counter.html
 ```
 
 ### Counter–type ADC
@@ -35,11 +40,20 @@ python cli.py counter.vcd \
 python cli.py counter.vcd \
   --signals clk,cmp,code \
   --units us \
-  --out-csv counter_traces.csv --png counter.png
+  --out-csv counter_traces.csv \
+  --png counter.png
 ```
 
 ### Generate class diagram (PlantUML)
 ```bash
-python tools/class_diagram.py --out out
+python tools/class_diagram.py \
+  --out out
 # => ./out/vcdTool_class_diagram.puml
 ```
+
+### Sphinx
+
+python -m transient_analysis.hurwitzTool.cli sphinx-skel transient_analysis/hurwitzTool/docs
+python -m sphinx -b html docs docs/_build/html
+open docs/_build/html/index.html
+sphinx-autobuild docs docs/_build/html

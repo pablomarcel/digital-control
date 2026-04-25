@@ -6,34 +6,68 @@ Run **from inside the package**:
 cd digitalControl/introduction/adcTool
 ```
 ```bash
-python cli.py --help
+python cli.py \
+  --help
 ```
 
 ## Counter-type examples
 
 ```bash
-python cli.py --type counter --csv vins.csv --nbits 10 --vref 3.3 --tclk 1e-6 --out counter_results.csv --trace counter.vcd
+python cli.py \
+  --type counter \
+  --csv vins.csv \
+  --nbits 10 \
+  --vref 3.3 \
+  --tclk 1e-6 \
+  --out counter_results.csv \
+  --trace counter.vcd
 ```
 
 ```bash
-python cli.py --type counter --json vins.json --nbits 12 --vref 5.0 --tclk 2e-6 --trace-all counter_all.vcd
+python cli.py \
+  --type counter \
+  --json vins.json \
+  --nbits 12 \
+  --vref 5.0 \
+  --tclk 2e-6 \
+  --trace-all counter_all.vcd
 ```
 
 ## SAR examples
 
 ```bash
-python cli.py --type sar --csv vins.csv --nbits 12 --vref 3.3 --tbit 1e-6 --out sar_results.csv --trace sar.vcd --radix all
+python cli.py \
+  --type sar \
+  --csv vins.csv \
+  --nbits 12 \
+  --vref 3.3 \
+  --tbit 1e-6 \
+  --out sar_results.csv \
+  --trace sar.vcd \
+  --radix all
 ```
 
 ```bash
-python cli.py --type sar --json vins.json --nbits 10 --vref 3.3 --tbit 5e-7 --trace-all sar_all.vcd
+python cli.py \
+  --type sar \
+  --json vins.json \
+  --nbits 10 \
+  --vref 3.3 \
+  --tbit 5e-7 \
+  --trace-all sar_all.vcd
 ```
 
 ## Class Diagram
 
 ```bash
-python tools/class_diagram.py --out out
+python tools/class_diagram.py \
+  --out out
 ```
 # => out/adcTool_class_diagram.puml
 
-#### Sphinx
+### Sphinx
+
+python -m transient_analysis.hurwitzTool.cli sphinx-skel transient_analysis/hurwitzTool/docs
+python -m sphinx -b html docs docs/_build/html
+open docs/_build/html/index.html
+sphinx-autobuild docs docs/_build/html
