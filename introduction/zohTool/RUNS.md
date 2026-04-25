@@ -95,7 +95,7 @@ python cli.py \
 
 ### Sphinx
 
-python -m transient_analysis.hurwitzTool.cli sphinx-skel transient_analysis/hurwitzTool/docs
+python -m introduction.zohTool.cli sphinx-skel introduction/zohTool/docs
 python -m sphinx -b html docs docs/_build/html
 open docs/_build/html/index.html
 sphinx-autobuild docs docs/_build/html

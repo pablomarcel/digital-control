@@ -39,7 +39,7 @@ python cli.py --example ogata_5_1 --json-out out/ogata_5_1_ss.json --latex-out o
 
 ### Sphinx
 
-python -m quadratic_control.quadraticTool.cli sphinx-skel quadratic_control/quadraticTool/docs
+python -m state_space.stateSpaceTool.cli sphinx-skel state_space/stateSpaceTool/docs
 python -m sphinx -b html docs docs/_build/html
 open docs/_build/html/index.html
 sphinx-autobuild docs docs/_build/html
