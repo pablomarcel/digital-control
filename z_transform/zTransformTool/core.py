@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-core.py — Pure logic for zTransformTool (no prints, no argparse).
+Pure computational routines for zTransformTool.
 
-Key robustness points:
-- Build A(u), B(u) in u = 1/z so A(0) != 0 (unilateral-friendly).
-- Compute the impulse response h[k] by solving the HOMOGENEOUS recurrence with
-  impulse-consistent initial conditions (captures k-polynomial factors from
-  repeated poles, e.g., (z-1)^2).
-- Always form x[k] by symbolic convolution of h[k] with B’s coefficients:
-  x[k] = sum_i b_i * h[k-i] * Heaviside(k-i, 1).
-- Heaviside(..., 1) so H(0) = 1 (unilateral).
-- Final GUARANTEE: fit the closed-form to the recurrence samples by adding a
-  homogeneous correction; ensures equality with the unilateral sequence, even
-  with repeated poles and input delays from B(u).
+This module intentionally avoids command-line parsing and printing. It contains
+symbolic and numeric helpers for forward z transforms, unilateral inverse
+z transforms, finite series expansion, transfer-function utilities, and
+difference-equation solving.
+
+The inverse-z workflow is written around the substitution ``u = 1/z``. Rational
+expressions are converted to ``B(u) / A(u)`` with ``A(0)`` nonzero when possible.
+The finite unilateral sequence is computed from the recurrence, and the symbolic
+closed form is matched back to those recurrence samples so repeated poles,
+polynomial factors in ``k``, and input delays remain consistent with the
+unilateral convention.
 """
 from __future__ import annotations
 from typing import Dict, Any, Optional, List, Tuple
