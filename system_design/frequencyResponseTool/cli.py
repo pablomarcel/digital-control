@@ -1,94 +1,368 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Command-line interface for :mod:`system_design.frequencyResponseTool`.
+
+The CLI preserves the original one-shot frequency-response workflow while
+adding a ``sphinx-skel`` helper for generating a conservative, GitHub Pages
+friendly Sphinx documentation skeleton.
+
+Historical usage still works::
+
+    python -m system_design.frequencyResponseTool.cli --T 0.1 --gz-num "1" --gz-den "1 -0.8"
+
+The explicit subcommand form is also supported::
+
+    python -m system_design.frequencyResponseTool.cli run --T 0.1 --gz-num "1" --gz-den "1 -0.8"
+    python -m system_design.frequencyResponseTool.cli sphinx-skel docs/frequencyResponseTool --force
+"""
 from __future__ import annotations
 
 import argparse
+import importlib
+import importlib.util
 import os
 import sys
-import json
+from pathlib import Path
+
 
 # ---------- Import shim so `python cli.py` works with absolute imports ----------
 if __package__ in (None, ""):
+    # Running as a script: add project root to sys.path and import absolute modules.
     pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     if pkg_root not in sys.path:
         sys.path.insert(0, pkg_root)
 
-    from system_design.frequencyResponseTool.apis import RunRequest, LeadParams, LagParams, LagLeadParams
+    from system_design.frequencyResponseTool.apis import (
+        LagLeadParams,
+        LagParams,
+        LeadParams,
+        RunRequest,
+    )
     from system_design.frequencyResponseTool.app import FrequencyResponseApp
     from system_design.frequencyResponseTool.io import parse_desc_list, write_manifest
 else:
-    from .apis import RunRequest, LeadParams, LagParams, LagLeadParams
+    # Normal package execution.
+    from .apis import LagLeadParams, LagParams, LeadParams, RunRequest
     from .app import FrequencyResponseApp
     from .io import parse_desc_list, write_manifest
 
-def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="w-plane frequency-response design (lead/lag/lag-lead).")
-    ap.add_argument("--T", type=float, required=True)
-    ap.add_argument("--gz-num", type=str, required=True, help="G(z) numerator, descending z powers")
-    ap.add_argument("--gz-den", type=str, required=True, help="G(z) denominator, descending z powers")
-    ap.add_argument("--comp", choices=["none","lead","lag","laglead","auto"], default="none")
+
+_PACKAGE = "system_design.frequencyResponseTool"
+_PROJECT = "Digital Control - system_design.frequencyResponseTool"
+_AUTHOR = "Digital Control"
+
+_REQUIRED_MODULES = [
+    "system_design.frequencyResponseTool.cli",
+    "system_design.frequencyResponseTool.apis",
+    "system_design.frequencyResponseTool.io",
+]
+
+_OPTIONAL_MODULES = [
+    "system_design.frequencyResponseTool.app",
+    "system_design.frequencyResponseTool.core",
+    "system_design.frequencyResponseTool.design",
+    "system_design.frequencyResponseTool.utils",
+    "system_design.frequencyResponseTool.plotting",
+    "system_design.frequencyResponseTool.examples",
+]
+
+_AUTODOC_MOCK_IMPORTS = [
+    "control",
+    "matplotlib",
+    "matplotlib.pyplot",
+    "numpy",
+    "pandas",
+    "plotly",
+    "plotly.graph_objects",
+    "scipy",
+    "scipy.linalg",
+    "scipy.signal",
+    "sympy",
+]
+
+
+# -----------------------------------------------------------------------------
+# Sphinx skeleton helpers
+# -----------------------------------------------------------------------------
+
+def _module_is_importable(module_name: str) -> bool:
+    """Return ``True`` only when a module can actually be imported.
+
+    ``find_spec`` catches modules that do not exist. ``import_module`` catches
+    modules that exist but fail because an optional runtime dependency is not
+    available. The generated API page should only include modules Sphinx can
+    safely autodoc from the current environment.
+    """
+    try:
+        if importlib.util.find_spec(module_name) is None:
+            return False
+        importlib.import_module(module_name)
+    except Exception:
+        return False
+    return True
+
+
+def _available_modules() -> list[str]:
+    """Return package modules that are safe for Sphinx autodoc to import."""
+    modules: list[str] = []
+    for mod in [*_REQUIRED_MODULES, *_OPTIONAL_MODULES]:
+        if _module_is_importable(mod):
+            modules.append(mod)
+    return modules
+
+
+def _rst_heading(text: str, underline: str = "=") -> str:
+    """Return a reStructuredText heading with a matching underline length."""
+    return f"{text}\n{underline * len(text)}\n\n"
+
+
+def _write_if_needed(path: Path, text: str, *, force: bool = False) -> bool:
+    """Write ``text`` unless ``path`` already exists and overwrite is disabled."""
+    if path.exists() and not force:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
+def _ensure_sphinx_support_dirs(dest: Path) -> None:
+    """Create Sphinx support directories and tracked placeholder files."""
+    for dirname in ("_templates", "_static"):
+        folder = dest / dirname
+        folder.mkdir(parents=True, exist_ok=True)
+        gitkeep = folder / ".gitkeep"
+        if not gitkeep.exists():
+            gitkeep.write_text("", encoding="utf-8")
+
+
+def _build_conf_py() -> str:
+    """Build a conservative Sphinx ``conf.py`` for GitHub Pages deployments."""
+    return f'''# Generated by {_PACKAGE}.cli
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# docs -> frequencyResponseTool -> system_design -> repository root
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
+
+project = {_PROJECT!r}
+author = {_AUTHOR!r}
+
+extensions = [
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.viewcode",
+]
+
+templates_path = ["_templates"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+html_theme = "furo"
+html_static_path = ["_static"]
+
+autodoc_typehints = "description"
+autodoc_mock_imports = {_AUTODOC_MOCK_IMPORTS!r}
+napoleon_google_docstring = True
+napoleon_numpy_docstring = True
+'''
+
+
+def _build_index_rst() -> str:
+    """Build a Sphinx ``index.rst`` page with safe heading underline lengths."""
+    title = f"Welcome to {_PACKAGE}'s documentation"
+    return (
+        f".. {_PACKAGE} documentation master file\n\n"
+        + _rst_heading(title, "=")
+        + ".. toctree::\n"
+        + "   :maxdepth: 2\n"
+        + "   :caption: Contents:\n\n"
+        + "   api\n"
+    )
+
+
+def _build_api_rst() -> str:
+    """Build an API page that includes only importable modules."""
+    parts: list[str] = [_rst_heading("API Reference", "=")]
+    modules = _available_modules()
+
+    if not modules:
+        parts.append(
+            "No modules were importable when this API page was generated.\n\n"
+            "Regenerate the Sphinx skeleton from an environment where the package "
+            "can be imported, or install the package dependencies before building docs.\n"
+        )
+        return "".join(parts)
+
+    for mod in modules:
+        parts.append(_rst_heading(mod, "-"))
+        parts.append(f".. automodule:: {mod}\n")
+        parts.append("   :members:\n")
+        parts.append("   :undoc-members:\n")
+        parts.append("   :show-inheritance:\n\n")
+
+    return "".join(parts)
+
+
+def _build_makefile() -> str:
+    """Build the minimal project-standard Sphinx Makefile."""
+    return """# Minimal Sphinx Makefile
+.PHONY: html clean
+html:
+	+sphinx-build -b html . _build/html
+clean:
+	+rm -rf _build
+"""
+
+
+def _write_sphinx_skeleton(dest: Path, *, force: bool = False) -> list[Path]:
+    """Create or update a deploy-safe Sphinx documentation skeleton."""
+    dest = dest.expanduser().resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+    _ensure_sphinx_support_dirs(dest)
+
+    files = {
+        dest / "conf.py": _build_conf_py(),
+        dest / "index.rst": _build_index_rst(),
+        dest / "api.rst": _build_api_rst(),
+        dest / "Makefile": _build_makefile(),
+    }
+
+    written: list[Path] = []
+    for path, text in files.items():
+        if _write_if_needed(path, text, force=force):
+            written.append(path)
+    return written
+
+
+# -----------------------------------------------------------------------------
+# Original frequency-response workflow
+# -----------------------------------------------------------------------------
+
+def _add_run_arguments(ap: argparse.ArgumentParser) -> None:
+    """Add the original frequencyResponseTool arguments to a parser."""
+    ap.add_argument("--T", type=float, required=True, help="Sample time.")
+    ap.add_argument("--gz-num", type=str, required=True, help="G(z) numerator, descending z powers.")
+    ap.add_argument("--gz-den", type=str, required=True, help="G(z) denominator, descending z powers.")
+    ap.add_argument(
+        "--comp",
+        choices=["none", "lead", "lag", "laglead", "auto"],
+        default="none",
+        help="Compensator mode.",
+    )
 
     # manual params
-    ap.add_argument("--K", type=float, default=1.0)
-    ap.add_argument("--alpha", type=float, default=0.4)
-    ap.add_argument("--tau", type=float, default=0.5)
-    ap.add_argument("--beta", type=float, default=4.0)
-    ap.add_argument("--tau-lag", type=float, default=0.8)
-    ap.add_argument("--tau-lead", type=float, default=0.2)
+    ap.add_argument("--K", type=float, default=1.0, help="Compensator gain.")
+    ap.add_argument("--alpha", type=float, default=0.4, help="Lead alpha parameter.")
+    ap.add_argument("--tau", type=float, default=0.5, help="Lead/lag time constant.")
+    ap.add_argument("--beta", type=float, default=4.0, help="Lag beta parameter.")
+    ap.add_argument("--tau-lag", type=float, default=0.8, help="Lag time constant for lag-lead mode.")
+    ap.add_argument("--tau-lead", type=float, default=0.2, help="Lead time constant for lag-lead mode.")
 
     # auto specs
-    ap.add_argument("--pm", type=float, default=50.0)
-    ap.add_argument("--gm", type=float, default=10.0)
-    ap.add_argument("--Kv", type=float, default=2.0)
+    ap.add_argument("--pm", type=float, default=50.0, help="Required phase margin in degrees for auto mode.")
+    ap.add_argument("--gm", type=float, default=10.0, help="Required gain margin in dB for auto mode.")
+    ap.add_argument("--Kv", type=float, default=2.0, help="Required velocity constant for auto mode.")
 
     # plotting
-    ap.add_argument("--plot", action="append", choices=["matplotlib","plotly"])
-    ap.add_argument("--save-mpl", action="store_true")
-    ap.add_argument("--plotly-output", choices=["html","png","svg","pdf"], default="html")
+    ap.add_argument(
+        "--plot",
+        action="append",
+        choices=["matplotlib", "plotly"],
+        help="Enable plotting backend. May be passed more than once.",
+    )
+    ap.add_argument("--save-mpl", action="store_true", help="Save Matplotlib figures when generated.")
+    ap.add_argument(
+        "--plotly-output",
+        choices=["html", "png", "svg", "pdf"],
+        default="html",
+        help="Plotly output format.",
+    )
 
     # step response
-    ap.add_argument("--step", type=int, default=0)
+    ap.add_argument("--step", type=int, default=0, help="Number of samples for optional step response.")
 
-    ap.add_argument("--out", type=str, default="out")
-    return ap
+    ap.add_argument("--out", type=str, default="out", help="Output directory.")
 
-def main(argv: list[str] | None = None) -> int:
-    ap = build_parser()
-    args = ap.parse_args(argv)
 
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser."""
+    parser = argparse.ArgumentParser(
+        prog="system_design.frequencyResponseTool",
+        description="w-plane frequency-response design with lead, lag, lag-lead, and auto modes.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    sub = parser.add_subparsers(dest="cmd")
+
+    run = sub.add_parser(
+        "run",
+        help="run w-plane frequency-response design",
+        description="Run the original frequencyResponseTool workflow.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    _add_run_arguments(run)
+
+    skel = sub.add_parser(
+        "sphinx-skel",
+        help="create a deploy-safe Sphinx documentation skeleton for this package",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    skel.add_argument("dest", type=Path, help="Destination docs directory.")
+    skel.add_argument("--force", action="store_true", help="Overwrite existing Sphinx skeleton files.")
+
+    return parser
+
+
+def _build_request(args: argparse.Namespace) -> RunRequest:
+    """Convert parsed CLI arguments into a ``RunRequest``."""
     gz_num = parse_desc_list(args.gz_num)
     gz_den = parse_desc_list(args.gz_den)
 
     mode = args.comp
     lead = lag = laglead = None
+
     if mode == "lead":
         lead = LeadParams(K=args.K, alpha=args.alpha, tau=args.tau)
     elif mode == "lag":
         lag = LagParams(K=args.K, beta=args.beta, tau=args.tau)
     elif mode == "laglead":
-        laglead = LagLeadParams(K=args.K, beta=args.beta, tau_lag=args.tau_lag, alpha=args.alpha, tau_lead=args.tau_lead)
+        laglead = LagLeadParams(
+            K=args.K,
+            beta=args.beta,
+            tau_lag=args.tau_lag,
+            alpha=args.alpha,
+            tau_lead=args.tau_lead,
+        )
 
-    req = RunRequest(
+    return RunRequest(
         T=float(args.T),
         gz_num_desc=gz_num,
         gz_den_desc=gz_den,
         mode=mode,
-        lead=lead, lag=lag, laglead=laglead,
-        pm_req=float(args.pm), gm_req=float(args.gm), Kv_req=float(args.Kv),
+        lead=lead,
+        lag=lag,
+        laglead=laglead,
+        pm_req=float(args.pm),
+        gm_req=float(args.gm),
+        Kv_req=float(args.Kv),
         use_mpl=("matplotlib" in (args.plot or [])),
         save_mpl=bool(args.save_mpl),
         use_plotly=("plotly" in (args.plot or [])),
         plotly_fmt=str(args.plotly_output),
         step_N=int(args.step),
-        out_dir=str(args.out)
+        out_dir=str(args.out),
     )
 
-    app = FrequencyResponseApp()
-    res = app.run(req)
 
-    manifest = {
-        "Gz_num_desc": gz_num,
-        "Gz_den_desc": gz_den,
+def _build_manifest(req: RunRequest, res: object) -> dict[str, object]:
+    """Build the historical JSON run manifest from an app result object."""
+    return {
+        "Gz_num_desc": req.gz_num_desc,
+        "Gz_den_desc": req.gz_den_desc,
         "Gd_w_num_asc": res.Gd_w_num_asc,
         "Gd_w_den_asc": res.Gd_w_den_asc,
         "Gd_z_num_desc": res.Gd_z_num_desc,
@@ -101,14 +375,24 @@ def main(argv: list[str] | None = None) -> int:
             "nu_gc": res.margins.nu_gc,
             "nu_pc": res.margins.nu_pc,
             "pm_deg": res.margins.pm_deg,
-            "gm_db": res.margins.gm_db
+            "gm_db": res.margins.gm_db,
         },
-        "files": [{"path": f.path, "desc": f.desc} for f in res.files]
+        "files": [{"path": f.path, "desc": f.desc} for f in res.files],
     }
+
+
+def _run_frequency_response(args: argparse.Namespace) -> int:
+    """Run the frequency-response design workflow."""
+    req = _build_request(args)
+
+    app = FrequencyResponseApp()
+    res = app.run(req)
+
+    manifest = _build_manifest(req, res)
     path = write_manifest(args.out, manifest)
 
     print("\n=== Files generated in this run ===")
-    for f in res.files + []:
+    for f in res.files:
         try:
             print(f"{f.path}  —  {f.desc}  ({os.path.getsize(f.path)} bytes)")
         except Exception:
@@ -117,5 +401,47 @@ def main(argv: list[str] | None = None) -> int:
 
     return 0
 
-if __name__ == "__main__":
+
+def _run_sphinx_skel(args: argparse.Namespace) -> int:
+    """Generate the Sphinx documentation skeleton."""
+    written = _write_sphinx_skeleton(args.dest, force=args.force)
+
+    print(f"Sphinx skeleton ready: {args.dest}")
+    if written:
+        print("Written files:")
+        for path in written:
+            print(f"  {path}")
+    else:
+        print("No existing files were overwritten. Use --force to regenerate.")
+
+    print("Support files ensured:")
+    print(f"  {args.dest / '_static' / '.gitkeep'}")
+    print(f"  {args.dest / '_templates' / '.gitkeep'}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the frequencyResponseTool command-line interface."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.cmd == "sphinx-skel":
+        return _run_sphinx_skel(args)
+
+    if args.cmd is None:
+        legacy_args = list(sys.argv[1:] if argv is None else argv)
+        if legacy_args and legacy_args[0] not in {"run", "sphinx-skel", "-h", "--help"}:
+            args = parser.parse_args(["run", *legacy_args])
+        else:
+            parser.print_help()
+            return 0
+
+    if args.cmd == "run":
+        return _run_frequency_response(args)
+
+    parser.print_help()
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())

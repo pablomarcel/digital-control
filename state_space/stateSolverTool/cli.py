@@ -1,14 +1,34 @@
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Command-line interface for :mod:`state_space.stateSolverTool`.
+
+The CLI supports two usage styles:
+
+1. Modern subcommand form::
+
+       python -m state_space.stateSolverTool.cli run --example ogata_5_2
+
+2. Historical no-subcommand form::
+
+       python -m state_space.stateSolverTool.cli --example ogata_5_2
+
+It also includes a ``sphinx-skel`` helper for generating a conservative,
+GitHub Pages friendly Sphinx documentation skeleton.
+"""
 from __future__ import annotations
 
 import argparse
+import importlib
+import importlib.util
 import os
 import sys
+from pathlib import Path
+
 
 # ---------- Import shim so `python cli.py` works with absolute imports ----------
 if __package__ in (None, ""):
+    # Running as a script: add project root to sys.path and import absolute modules.
     pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     if pkg_root not in sys.path:
         sys.path.insert(0, pkg_root)
@@ -19,74 +39,389 @@ else:
     from .apis import RunRequest
     from .app import StateSolverApp
 
-def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="state_space.stateSolverTool — Symbolic State Solver (LTI/LTV)")
-    ap.add_argument("--mode", choices=["lti", "ltv"], default="lti")
-    ap.add_argument("--example", choices=["ogata_5_2", "ogata_5_3"], default=None)
-    # LTI
-    ap.add_argument("--G"); ap.add_argument("--H"); ap.add_argument("--C"); ap.add_argument("--D")
-    ap.add_argument("--x0"); ap.add_argument("--u")
-    # LTV
-    ap.add_argument("--Gk"); ap.add_argument("--Hk"); ap.add_argument("--Ck"); ap.add_argument("--Dk")
-    # Options
-    ap.add_argument("--latex", action="store_true")
-    ap.add_argument("--latex-out", type=str, default=None)
-    ap.add_argument("--zt", action="store_true")
-    ap.add_argument("--realblocks", action="store_true")
-    ap.add_argument("--steps", type=int, default=6)
-    ap.add_argument("--check", choices=["off", "brief"], default="brief")
-    ap.add_argument("--power-style", choices=["rational", "integer"], default="rational")
-    return ap
 
-def main(argv=None):
-    argv = argv or sys.argv[1:]
-    ap = build_parser()
-    ns = ap.parse_args(argv)
+_PACKAGE = "state_space.stateSolverTool"
+_PROJECT = "Digital Control - state_space.stateSolverTool"
+_AUTHOR = "Digital Control"
 
-    # Locate package dir (for out/)
-    if __package__ in (None, ""):
-        pkg_dir = os.path.dirname(__file__)
-    else:
-        pkg_dir = os.path.dirname(__file__)
+_REQUIRED_MODULES = [
+    "state_space.stateSolverTool.cli",
+    "state_space.stateSolverTool.apis",
+]
 
-    app = StateSolverApp(pkg_dir=pkg_dir)
-    req = RunRequest(
-        mode=ns.mode, example=ns.example,
-        G=ns.G, H=ns.H, C=ns.C, D=ns.D, x0=ns.x0, u=ns.u,
-        Gk=ns.Gk, Hk=ns.Hk, Ck=ns.Ck, Dk=ns.Dk,
-        latex=ns.latex, latex_out=ns.latex_out, zt=ns.zt,
-        realblocks=ns.realblocks, steps=ns.steps, check=ns.check,
-        power_style=ns.power_style
+_OPTIONAL_MODULES = [
+    "state_space.stateSolverTool.app",
+    "state_space.stateSolverTool.core",
+    "state_space.stateSolverTool.io",
+    "state_space.stateSolverTool.utils",
+    "state_space.stateSolverTool.plotting",
+    "state_space.stateSolverTool.design",
+    "state_space.stateSolverTool.examples",
+]
+
+_AUTODOC_MOCK_IMPORTS = [
+    "control",
+    "matplotlib",
+    "matplotlib.pyplot",
+    "numpy",
+    "pandas",
+    "plotly",
+    "plotly.graph_objects",
+    "scipy",
+    "scipy.linalg",
+    "sympy",
+]
+
+
+def _module_is_importable(module_name: str) -> bool:
+    """Return ``True`` only when a module can actually be imported.
+
+    ``importlib.util.find_spec`` can report that a module exists even when the
+    module still fails during import because an optional dependency is missing.
+    Sphinx autodoc needs importable modules, so this helper performs the stricter
+    check used by the generated API page.
+    """
+    try:
+        if importlib.util.find_spec(module_name) is None:
+            return False
+        importlib.import_module(module_name)
+    except Exception:
+        return False
+    return True
+
+
+def _available_modules() -> list[str]:
+    """Return package modules that are safe for Sphinx autodoc to import."""
+    modules: list[str] = []
+    for mod in [*_REQUIRED_MODULES, *_OPTIONAL_MODULES]:
+        if _module_is_importable(mod):
+            modules.append(mod)
+    return modules
+
+
+def _rst_heading(text: str, underline: str = "=") -> str:
+    """Return a reStructuredText heading with a matching underline length."""
+    return f"{text}\n{underline * len(text)}\n\n"
+
+
+def _write_if_needed(path: Path, text: str, *, force: bool = False) -> bool:
+    """Write ``text`` unless ``path`` already exists and overwrite is disabled."""
+    if path.exists() and not force:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
+def _ensure_sphinx_support_dirs(dest: Path) -> None:
+    """Create Sphinx support directories and tracked placeholder files."""
+    for dirname in ("_templates", "_static"):
+        folder = dest / dirname
+        folder.mkdir(parents=True, exist_ok=True)
+        gitkeep = folder / ".gitkeep"
+        if not gitkeep.exists():
+            gitkeep.write_text("", encoding="utf-8")
+
+
+def _build_conf_py() -> str:
+    """Build a conservative Sphinx ``conf.py`` for GitHub Pages deployments."""
+    return f"""# Generated by {_PACKAGE}.cli
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# docs -> stateSolverTool -> state_space -> repository root
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
+
+project = {_PROJECT!r}
+author = {_AUTHOR!r}
+
+extensions = [
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.viewcode",
+]
+
+templates_path = ["_templates"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+html_theme = "furo"
+html_static_path = ["_static"]
+
+autodoc_typehints = "description"
+autodoc_mock_imports = {_AUTODOC_MOCK_IMPORTS!r}
+napoleon_google_docstring = True
+napoleon_numpy_docstring = True
+"""
+
+
+def _build_index_rst() -> str:
+    """Build a Sphinx ``index.rst`` page with safe heading underline lengths."""
+    title = f"Welcome to {_PACKAGE}'s documentation"
+    return (
+        f".. {_PACKAGE} documentation master file\n\n"
+        + _rst_heading(title, "=")
+        + ".. toctree::\n"
+        + "   :maxdepth: 2\n"
+        + "   :caption: Contents:\n\n"
+        + "   api\n"
     )
-    res = app.run(req)
 
-    # Console reporting (succinct; rich info lives in res)
+
+def _build_api_rst() -> str:
+    """Build an API page that includes only importable modules."""
+    parts: list[str] = [_rst_heading("API Reference", "=")]
+    modules = _available_modules()
+
+    if not modules:
+        parts.append(
+            "No modules were importable when this API page was generated.\n\n"
+            "Regenerate the Sphinx skeleton from an environment where the package "
+            "can be imported, or install the package dependencies before building docs.\n"
+        )
+        return "".join(parts)
+
+    for mod in modules:
+        parts.append(_rst_heading(mod, "-"))
+        parts.append(f".. automodule:: {mod}\n")
+        parts.append("   :members:\n")
+        parts.append("   :undoc-members:\n")
+        parts.append("   :show-inheritance:\n\n")
+
+    return "".join(parts)
+
+
+def _build_makefile() -> str:
+    """Build the minimal project-standard Sphinx Makefile."""
+    return """# Minimal Sphinx Makefile
+.PHONY: html clean
+html:
+	+sphinx-build -b html . _build/html
+clean:
+	+rm -rf _build
+"""
+
+
+def _write_sphinx_skeleton(dest: Path, *, force: bool = False) -> list[Path]:
+    """Create or update a deploy-safe Sphinx documentation skeleton."""
+    dest = dest.expanduser().resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+    _ensure_sphinx_support_dirs(dest)
+
+    files = {
+        dest / "conf.py": _build_conf_py(),
+        dest / "index.rst": _build_index_rst(),
+        dest / "api.rst": _build_api_rst(),
+        dest / "Makefile": _build_makefile(),
+    }
+
+    written: list[Path] = []
+    for path, text in files.items():
+        if _write_if_needed(path, text, force=force):
+            written.append(path)
+    return written
+
+
+def _add_run_arguments(ap: argparse.ArgumentParser) -> None:
+    """Add symbolic state-solver run arguments to ``ap``."""
+    ap.add_argument("--mode", choices=["lti", "ltv"], default="lti", help="Solver mode.")
+    ap.add_argument("--example", choices=["ogata_5_2", "ogata_5_3"], default=None, help="Built-in example to run.")
+
+    # LTI inputs
+    ap.add_argument("--G", help="LTI state matrix G.")
+    ap.add_argument("--H", help="LTI input matrix H.")
+    ap.add_argument("--C", help="LTI output matrix C.")
+    ap.add_argument("--D", help="LTI feedthrough matrix D.")
+    ap.add_argument("--x0", help="Initial state x(0).")
+    ap.add_argument("--u", help="Input sequence/expression u(k).")
+
+    # LTV inputs
+    ap.add_argument("--Gk", help="LTV state matrix G(k).")
+    ap.add_argument("--Hk", help="LTV input matrix H(k).")
+    ap.add_argument("--Ck", help="LTV output matrix C(k).")
+    ap.add_argument("--Dk", help="LTV feedthrough matrix D(k).")
+
+    # Options
+    ap.add_argument("--latex", action="store_true", help="Emit LaTeX output when supported.")
+    ap.add_argument("--latex-out", type=str, default=None, help="Write LaTeX output to a file.")
+    ap.add_argument("--zt", action="store_true", help="Use z-transform workflow when supported.")
+    ap.add_argument("--realblocks", action="store_true", help="Use real block representation where supported.")
+    ap.add_argument("--steps", type=int, default=6, help="Number of LTV steps to print.")
+    ap.add_argument("--check", choices=["off", "brief"], default="brief", help="Check/reporting level.")
+    ap.add_argument(
+        "--power-style",
+        choices=["rational", "integer"],
+        default="rational",
+        help="Power simplification/display style.",
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser."""
+    parser = argparse.ArgumentParser(
+        prog="state_space.stateSolverTool",
+        description="Symbolic state solver for LTI and LTV systems.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+
+    sub = parser.add_subparsers(dest="cmd")
+
+    run = sub.add_parser(
+        "run",
+        help="run symbolic state solver",
+        description="Run symbolic LTI/LTV state response and output response calculations.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    _add_run_arguments(run)
+
+    skel = sub.add_parser(
+        "sphinx-skel",
+        help="create a deploy-safe Sphinx documentation skeleton for this package",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    skel.add_argument("dest", type=Path, help="Destination docs directory.")
+    skel.add_argument("--force", action="store_true", help="Overwrite existing Sphinx skeleton files.")
+
+    return parser
+
+
+def _package_dir() -> str:
+    """Return the package directory used for package-local out/ handling."""
+    return os.path.dirname(__file__)
+
+
+def _build_request(ns: argparse.Namespace) -> RunRequest:
+    """Build a ``RunRequest`` from parsed CLI arguments."""
+    return RunRequest(
+        mode=ns.mode,
+        example=ns.example,
+        G=ns.G,
+        H=ns.H,
+        C=ns.C,
+        D=ns.D,
+        x0=ns.x0,
+        u=ns.u,
+        Gk=ns.Gk,
+        Hk=ns.Hk,
+        Ck=ns.Ck,
+        Dk=ns.Dk,
+        latex=ns.latex,
+        latex_out=ns.latex_out,
+        zt=ns.zt,
+        realblocks=ns.realblocks,
+        steps=ns.steps,
+        check=ns.check,
+        power_style=ns.power_style,
+    )
+
+
+def _print_lti_report(ns: argparse.Namespace, res: object) -> None:
+    """Print the historical LTI console report."""
     import sympy as sp
     from state_space.stateSolverTool.io import fmt_matrix_for_console as fmt
 
-    if res.mode == "lti":
-        m = res.lti.matrices
-        print("\n== LTI system ==")
-        print("G = {}".format(fmt(m.G))); print("H = {}".format(fmt(m.H)))
-        print("C = {}".format(fmt(m.C))); print("D = {}".format(fmt(m.D)))
-        print("x(0) = {}".format(fmt(m.x0))); print("u(k) = {}".format(sp.sstr(m.u_expr)))
-        print("\n(zI - G)^(-1) = {}".format(fmt(res.lti.inv_zI_minus_G)))
-        print("Psi(k) = {}".format(fmt(res.lti.Psi)))
-        print("x(k)   = {}".format(fmt(res.lti.xk)))
-        print("y(k)   = {}".format(fmt(res.lti.yk)))
-        if res.lti.check_status:
-            print(f"[check] brief: {res.lti.check_status}")
-        if res.lti.latex_lines and ns.latex_out:
-            print(f"Saved LaTeX to {ns.latex_out if os.path.isabs(ns.latex_out) else os.path.join('out', ns.latex_out)}")
-    else:
-        print("\n== LTV system ==")
-        print(f"[check] brief: {res.ltv.check_status}")
-        print("Phi = {}".format(fmt(res.ltv.Phi)))
-        for i, xi in enumerate(res.ltv.xs[: ns.steps+1]):
-            print(f"x({i}) = {fmt(xi)}")
-        for i, yi in enumerate(res.ltv.ys[: ns.steps]):
-            yM = yi if isinstance(yi, sp.MatrixBase) else sp.Matrix([[yi]])
-            print(f"y({i}) = {fmt(yM)}")
+    m = res.lti.matrices
+    print("\n== LTI system ==")
+    print("G = {}".format(fmt(m.G)))
+    print("H = {}".format(fmt(m.H)))
+    print("C = {}".format(fmt(m.C)))
+    print("D = {}".format(fmt(m.D)))
+    print("x(0) = {}".format(fmt(m.x0)))
+    print("u(k) = {}".format(sp.sstr(m.u_expr)))
+    print("\n(zI - G)^(-1) = {}".format(fmt(res.lti.inv_zI_minus_G)))
+    print("Psi(k) = {}".format(fmt(res.lti.Psi)))
+    print("x(k)   = {}".format(fmt(res.lti.xk)))
+    print("y(k)   = {}".format(fmt(res.lti.yk)))
 
-if __name__ == "__main__":
-    main()
+    if res.lti.check_status:
+        print(f"[check] brief: {res.lti.check_status}")
+
+    if res.lti.latex_lines and ns.latex_out:
+        if os.path.isabs(ns.latex_out):
+            display_path = ns.latex_out
+        else:
+            display_path = os.path.join("out", ns.latex_out)
+        print(f"Saved LaTeX to {display_path}")
+
+
+def _print_ltv_report(ns: argparse.Namespace, res: object) -> None:
+    """Print the historical LTV console report."""
+    import sympy as sp
+    from state_space.stateSolverTool.io import fmt_matrix_for_console as fmt
+
+    print("\n== LTV system ==")
+    print(f"[check] brief: {res.ltv.check_status}")
+    print("Phi = {}".format(fmt(res.ltv.Phi)))
+
+    for i, xi in enumerate(res.ltv.xs[: ns.steps + 1]):
+        print(f"x({i}) = {fmt(xi)}")
+
+    for i, yi in enumerate(res.ltv.ys[: ns.steps]):
+        yM = yi if isinstance(yi, sp.MatrixBase) else sp.Matrix([[yi]])
+        print(f"y({i}) = {fmt(yM)}")
+
+
+def _print_results(ns: argparse.Namespace, res: object) -> None:
+    """Print the symbolic state-solver result report."""
+    if res.mode == "lti":
+        _print_lti_report(ns, res)
+    else:
+        _print_ltv_report(ns, res)
+
+
+def _run_state_solver(ns: argparse.Namespace) -> int:
+    """Run the symbolic state-solver workflow."""
+    app = StateSolverApp(pkg_dir=_package_dir())
+    req = _build_request(ns)
+    res = app.run(req)
+    _print_results(ns, res)
+    return 0
+
+
+def _run_sphinx_skel(ns: argparse.Namespace) -> int:
+    """Generate the Sphinx documentation skeleton."""
+    written = _write_sphinx_skeleton(ns.dest, force=ns.force)
+
+    print(f"Sphinx skeleton ready: {ns.dest}")
+    if written:
+        print("Written files:")
+        for path in written:
+            print(f"  {path}")
+    else:
+        print("No existing files were overwritten. Use --force to regenerate.")
+
+    print("Support files ensured:")
+    print(f"  {ns.dest / '_static' / '.gitkeep'}")
+    print(f"  {ns.dest / '_templates' / '.gitkeep'}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the stateSolverTool command-line interface."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.cmd == "sphinx-skel":
+        return _run_sphinx_skel(args)
+
+    if args.cmd is None:
+        legacy_args = list(sys.argv[1:] if argv is None else argv)
+        if legacy_args and legacy_args[0] not in {"run", "sphinx-skel", "-h", "--help"}:
+            args = parser.parse_args(["run", *legacy_args])
+        else:
+            parser.print_help()
+            return 0
+
+    if args.cmd == "run":
+        return _run_state_solver(args)
+
+    parser.print_help()
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

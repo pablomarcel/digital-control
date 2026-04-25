@@ -1,17 +1,36 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+Command-line interface for :mod:`state_space.liapunovTool`.
+
+The CLI preserves the original Lyapunov-tool subcommands:
+
+* ``ct``
+* ``dt``
+* ``example``
+
+It also adds a ``sphinx-skel`` helper for generating a conservative,
+GitHub Pages friendly Sphinx documentation skeleton.
+"""
 from __future__ import annotations
 
 import argparse
+import importlib
+import importlib.util
 import os
 import sys
+from pathlib import Path
+
 import sympy as sp
+
 
 # ---------- Import shim so `python cli.py` works with absolute imports ----------
 if __package__ in (None, ""):
+    # Running as a script: add project root to sys.path and import absolute modules.
     pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     if pkg_root not in sys.path:
         sys.path.insert(0, pkg_root)
+
     from state_space.liapunovTool.apis import RunRequest
     from state_space.liapunovTool.app import LyapunovApp
     from state_space.liapunovTool.design import fmt
@@ -20,52 +39,275 @@ else:
     from .app import LyapunovApp
     from .design import fmt
 
-def main():
-    ap = argparse.ArgumentParser(description="state_space.liapunovTool — Continuous/Discrete Lyapunov (Ogata §5-6)")
-    sub = ap.add_subparsers(dest="cmd")
 
-    ct = sub.add_parser("ct", help="Solve A^T P + P A = -Q (or A^* with --hermitian).")
-    ct.add_argument("--A", required=True, help="System matrix A, e.g., '[[0 1]; [-25 -4]]'.")
-    ct.add_argument("--Q", required=True, help="Weight matrix Q, e.g., '[[1 0]; [0 1]]'.")
-    ct.add_argument("--hermitian", action="store_true", help="Use Hermitian A^* and enforce Hermitian P.")
-    ct.add_argument("--digits", type=int, default=6)
-    ct.add_argument("--evalf", type=int, default=None)
-    ct.add_argument("--latex", action="store_true")
-    ct.add_argument("--latex-out")
-    ct.set_defaults(which=None)
+_PACKAGE = "state_space.liapunovTool"
+_PROJECT = "Digital Control - state_space.liapunovTool"
+_AUTHOR = "Digital Control"
 
-    dt = sub.add_parser("dt", help="Solve G^T P G - P = -Q (or G^* with --hermitian).")
-    dt.add_argument("--G", required=True, help="State matrix G, e.g., '[[0.97 0.05]; [-1.1 0.79]]'.")
-    dt.add_argument("--Q", required=True, help="Weight matrix Q, e.g., '[[1 0]; [0 1]]'.")
-    dt.add_argument("--hermitian", action="store_true", help="Use Hermitian G^* and enforce Hermitian P.")
-    dt.add_argument("--digits", type=int, default=6)
-    dt.add_argument("--evalf", type=int, default=None)
-    dt.add_argument("--latex", action="store_true")
-    dt.add_argument("--latex-out")
-    dt.set_defaults(which=None)
+_REQUIRED_MODULES = [
+    "state_space.liapunovTool.cli",
+    "state_space.liapunovTool.apis",
+]
 
-    ex = sub.add_parser("example", help="Run built-in textbook examples (Ogata).")
-    ex.add_argument("which", choices=["ogata_5_8", "ogata_5_9"])
-    ex.add_argument("--digits", type=int, default=6)
-    ex.add_argument("--evalf", type=int, default=None)
-    ex.add_argument("--latex", action="store_true")
-    ex.add_argument("--latex-out")
+_OPTIONAL_MODULES = [
+    "state_space.liapunovTool.app",
+    "state_space.liapunovTool.core",
+    "state_space.liapunovTool.io",
+    "state_space.liapunovTool.utils",
+    "state_space.liapunovTool.plotting",
+    "state_space.liapunovTool.design",
+    "state_space.liapunovTool.examples",
+]
 
-    args = ap.parse_args()
-    if not args.cmd:
-        ap.print_help()
-        sys.exit(2)
+_AUTODOC_MOCK_IMPORTS = [
+    "control",
+    "matplotlib",
+    "matplotlib.pyplot",
+    "numpy",
+    "pandas",
+    "plotly",
+    "plotly.graph_objects",
+    "scipy",
+    "scipy.linalg",
+    "sympy",
+]
 
-    mode = "example" if args.cmd == "example" else args.cmd  # type: ignore
-    req = RunRequest(
-        mode=mode, A=getattr(args, "A", None), G=getattr(args, "G", None), Q=getattr(args, "Q", None),
-        hermitian=getattr(args, "hermitian", False), digits=args.digits, evalf=args.evalf,
-        latex=args.latex, latex_out=args.latex_out, which=getattr(args, "which", None)
+
+def _module_is_importable(module_name: str) -> bool:
+    """Return ``True`` only when a module can actually be imported.
+
+    ``importlib.util.find_spec`` can report that a module exists even when the
+    module still fails during import because an optional dependency is missing.
+    Sphinx autodoc needs importable modules, so this helper performs the stricter
+    check used by the generated API page.
+    """
+    try:
+        if importlib.util.find_spec(module_name) is None:
+            return False
+        importlib.import_module(module_name)
+    except Exception:
+        return False
+    return True
+
+
+def _available_modules() -> list[str]:
+    """Return package modules that are safe for Sphinx autodoc to import."""
+    modules: list[str] = []
+    for mod in [*_REQUIRED_MODULES, *_OPTIONAL_MODULES]:
+        if _module_is_importable(mod):
+            modules.append(mod)
+    return modules
+
+
+def _rst_heading(text: str, underline: str = "=") -> str:
+    """Return a reStructuredText heading with a matching underline length."""
+    return f"{text}\n{underline * len(text)}\n\n"
+
+
+def _write_if_needed(path: Path, text: str, *, force: bool = False) -> bool:
+    """Write ``text`` unless ``path`` already exists and overwrite is disabled."""
+    if path.exists() and not force:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
+def _ensure_sphinx_support_dirs(dest: Path) -> None:
+    """Create Sphinx support directories and tracked placeholder files."""
+    for dirname in ("_templates", "_static"):
+        folder = dest / dirname
+        folder.mkdir(parents=True, exist_ok=True)
+        gitkeep = folder / ".gitkeep"
+        if not gitkeep.exists():
+            gitkeep.write_text("", encoding="utf-8")
+
+
+def _build_conf_py() -> str:
+    """Build a conservative Sphinx ``conf.py`` for GitHub Pages deployments."""
+    return f"""# Generated by {_PACKAGE}.cli
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# docs -> liapunovTool -> state_space -> repository root
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT))
+
+project = {_PROJECT!r}
+author = {_AUTHOR!r}
+
+extensions = [
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.viewcode",
+]
+
+templates_path = ["_templates"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+html_theme = "furo"
+html_static_path = ["_static"]
+
+autodoc_typehints = "description"
+autodoc_mock_imports = {_AUTODOC_MOCK_IMPORTS!r}
+napoleon_google_docstring = True
+napoleon_numpy_docstring = True
+"""
+
+
+def _build_index_rst() -> str:
+    """Build a Sphinx ``index.rst`` page with safe heading underline lengths."""
+    title = f"Welcome to {_PACKAGE}'s documentation"
+    return (
+        f".. {_PACKAGE} documentation master file\n\n"
+        + _rst_heading(title, "=")
+        + ".. toctree::\n"
+        + "   :maxdepth: 2\n"
+        + "   :caption: Contents:\n\n"
+        + "   api\n"
     )
 
-    app = LyapunovApp()
-    res = app.run(req)
 
+def _build_api_rst() -> str:
+    """Build an API page that includes only importable modules."""
+    parts: list[str] = [_rst_heading("API Reference", "=")]
+    modules = _available_modules()
+
+    if not modules:
+        parts.append(
+            "No modules were importable when this API page was generated.\n\n"
+            "Regenerate the Sphinx skeleton from an environment where the package "
+            "can be imported, or install the package dependencies before building docs.\n"
+        )
+        return "".join(parts)
+
+    for mod in modules:
+        parts.append(_rst_heading(mod, "-"))
+        parts.append(f".. automodule:: {mod}\n")
+        parts.append("   :members:\n")
+        parts.append("   :undoc-members:\n")
+        parts.append("   :show-inheritance:\n\n")
+
+    return "".join(parts)
+
+
+def _build_makefile() -> str:
+    """Build the minimal project-standard Sphinx Makefile."""
+    return """# Minimal Sphinx Makefile
+.PHONY: html clean
+html:
+	+sphinx-build -b html . _build/html
+clean:
+	+rm -rf _build
+"""
+
+
+def _write_sphinx_skeleton(dest: Path, *, force: bool = False) -> list[Path]:
+    """Create or update a deploy-safe Sphinx documentation skeleton."""
+    dest = dest.expanduser().resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+    _ensure_sphinx_support_dirs(dest)
+
+    files = {
+        dest / "conf.py": _build_conf_py(),
+        dest / "index.rst": _build_index_rst(),
+        dest / "api.rst": _build_api_rst(),
+        dest / "Makefile": _build_makefile(),
+    }
+
+    written: list[Path] = []
+    for path, text in files.items():
+        if _write_if_needed(path, text, force=force):
+            written.append(path)
+    return written
+
+
+def _add_common_result_arguments(parser: argparse.ArgumentParser) -> None:
+    """Add output-formatting arguments shared by Lyapunov workflows."""
+    parser.add_argument("--digits", type=int, default=6, help="Digits used for numeric display.")
+    parser.add_argument("--evalf", type=int, default=None, help="Optional SymPy evalf precision.")
+    parser.add_argument("--latex", action="store_true", help="Print LaTeX output when supported.")
+    parser.add_argument("--latex-out", help="Optional file path for LaTeX output.")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser."""
+    ap = argparse.ArgumentParser(
+        prog="state_space.liapunovTool",
+        description="Continuous- and discrete-time Lyapunov equation solver for Ogata-style workflows.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    sub = ap.add_subparsers(dest="cmd")
+
+    ct = sub.add_parser(
+        "ct",
+        help="solve continuous-time Lyapunov equation",
+        description="Solve A^T P + P A = -Q. Use --hermitian for A* and Hermitian P.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    ct.add_argument("--A", required=True, help='System matrix A, e.g. "[[0 1]; [-25 -4]]".')
+    ct.add_argument("--Q", required=True, help='Weight matrix Q, e.g. "[[1 0]; [0 1]]".')
+    ct.add_argument("--hermitian", action="store_true", help="Use Hermitian A* and enforce Hermitian P.")
+    _add_common_result_arguments(ct)
+    ct.set_defaults(which=None)
+
+    dt = sub.add_parser(
+        "dt",
+        help="solve discrete-time Lyapunov equation",
+        description="Solve G^T P G - P = -Q. Use --hermitian for G* and Hermitian P.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    dt.add_argument("--G", required=True, help='State matrix G, e.g. "[[0.97 0.05]; [-1.1 0.79]]".')
+    dt.add_argument("--Q", required=True, help='Weight matrix Q, e.g. "[[1 0]; [0 1]]".')
+    dt.add_argument("--hermitian", action="store_true", help="Use Hermitian G* and enforce Hermitian P.")
+    _add_common_result_arguments(dt)
+    dt.set_defaults(which=None)
+
+    ex = sub.add_parser(
+        "example",
+        help="run built-in Ogata textbook examples",
+        description="Run built-in Ogata Lyapunov examples.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    ex.add_argument("which", choices=["ogata_5_8", "ogata_5_9"], help="Built-in example identifier.")
+    _add_common_result_arguments(ex)
+
+    skel = sub.add_parser(
+        "sphinx-skel",
+        help="create a deploy-safe Sphinx documentation skeleton for this package",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
+    )
+    skel.add_argument("dest", type=Path, help="Destination docs directory.")
+    skel.add_argument("--force", action="store_true", help="Overwrite existing Sphinx skeleton files.")
+
+    return ap
+
+
+def _build_request(args: argparse.Namespace) -> RunRequest:
+    """Build a ``RunRequest`` from parsed CLI arguments."""
+    mode = "example" if args.cmd == "example" else args.cmd
+    return RunRequest(
+        mode=mode,
+        A=getattr(args, "A", None),
+        G=getattr(args, "G", None),
+        Q=getattr(args, "Q", None),
+        hermitian=getattr(args, "hermitian", False),
+        digits=args.digits,
+        evalf=args.evalf,
+        latex=args.latex,
+        latex_out=args.latex_out,
+        which=getattr(args, "which", None),
+    )
+
+
+def _print_results(args: argparse.Namespace, res: object) -> None:
+    """Print the historical Lyapunov result summary."""
     print("\n== Results ==")
     print(f"mode = {res.mode}; hermitian = {res.hermitian}")
     print(f"P = {fmt(res.P)}")
@@ -78,5 +320,52 @@ def main():
         print("\n== LaTeX ==")
         print(res.latex_text)
 
-if __name__ == "__main__":
-    main()
+
+def _run_lyapunov(args: argparse.Namespace) -> int:
+    """Run the selected Lyapunov workflow."""
+    req = _build_request(args)
+    app = LyapunovApp()
+    res = app.run(req)
+    _print_results(args, res)
+    return 0
+
+
+def _run_sphinx_skel(args: argparse.Namespace) -> int:
+    """Generate the Sphinx documentation skeleton."""
+    written = _write_sphinx_skeleton(args.dest, force=args.force)
+
+    print(f"Sphinx skeleton ready: {args.dest}")
+    if written:
+        print("Written files:")
+        for path in written:
+            print(f"  {path}")
+    else:
+        print("No existing files were overwritten. Use --force to regenerate.")
+
+    print("Support files ensured:")
+    print(f"  {args.dest / '_static' / '.gitkeep'}")
+    print(f"  {args.dest / '_templates' / '.gitkeep'}")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the liapunovTool command-line interface."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.cmd == "sphinx-skel":
+        return _run_sphinx_skel(args)
+
+    if not args.cmd:
+        parser.print_help()
+        return 2
+
+    if args.cmd in {"ct", "dt", "example"}:
+        return _run_lyapunov(args)
+
+    parser.error("Unknown command")
+    return 2
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
