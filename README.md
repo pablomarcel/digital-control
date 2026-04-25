@@ -1,7 +1,9 @@
 # Digital Control
 
-[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-3D74F7.svg)](https://pablomarcel.github.io/control-digitalControl/)
-[![Build & Publish Docs](https://github.com/pablomarcel/control-digitalControl/actions/workflows/pages.yml/badge.svg)](https://github.com/pablomarcel/control-digitalControl/actions/workflows/pages.yml)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-3D74F7.svg)](https://pablomarcel.github.io/digital-control/)
+[![Build & Publish Docs](https://github.com/pablomarcel/digital-control/actions/workflows/pages.yml/badge.svg)](https://github.com/pablomarcel/digital-control/actions/workflows/pages.yml)
+[![Python](https://img.shields.io/badge/python-3.x-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **Digital Control** is a Python-first engineering toolkit for studying, simulating, and designing discrete-time control systems through reproducible command-line workflows. It collects focused tools for z-transforms, z-plane analysis, sampled-data behavior, state-space simulation, pole placement, observers, Kalman filtering, RST control, LQR, Jury stability, ADC/DAC modeling, VCD utilities, and supporting digital-system analysis.
 
@@ -11,17 +13,44 @@ The project is organized as a set of small, topic-specific packages instead of a
 
 Live documentation is published with GitHub Pages:
 
-**https://pablomarcel.github.io/control-digitalControl/**
+**https://pablomarcel.github.io/digital-control/**
 
-Package documentation starts here:
+### Package Documentation Index
 
-- [intro/adcTool](https://pablomarcel.github.io/control-digitalControl/intro/adcTool)
+| Area | Tool | Documentation |
+|---|---|---|
+| Introduction | ADC Tool | [introduction/adcTool](https://pablomarcel.github.io/digital-control/introduction/adcTool/) |
+| Introduction | DAC Tool | [introduction/dacTool](https://pablomarcel.github.io/digital-control/introduction/dacTool/) |
+| Introduction | DEMUX Tool | [introduction/demuxTool](https://pablomarcel.github.io/digital-control/introduction/demuxTool/) |
+| Introduction | MUX Tool | [introduction/muxTool](https://pablomarcel.github.io/digital-control/introduction/muxTool/) |
+| Introduction | VCD Tool | [introduction/vcdTool](https://pablomarcel.github.io/digital-control/introduction/vcdTool/) |
+| Introduction | ZOH Tool | [introduction/zohTool](https://pablomarcel.github.io/digital-control/introduction/zohTool/) |
+| Kalman Filters | Kalman Filter Tool | [kalman_filters/kalmanFilterTool](https://pablomarcel.github.io/digital-control/kalman_filters/kalmanFilterTool/) |
+| Pole Placement | Controllability Tool | [pole_placement/controllabilityTool](https://pablomarcel.github.io/digital-control/pole_placement/controllabilityTool/) |
+| Pole Placement | Observability Tool | [pole_placement/observabilityTool](https://pablomarcel.github.io/digital-control/pole_placement/observabilityTool/) |
+| Pole Placement | Observer Tool | [pole_placement/observerTool](https://pablomarcel.github.io/digital-control/pole_placement/observerTool/) |
+| Pole Placement | Pole Tool | [pole_placement/poleTool](https://pablomarcel.github.io/digital-control/pole_placement/poleTool/) |
+| Pole Placement | Servo Tool | [pole_placement/servoTool](https://pablomarcel.github.io/digital-control/pole_placement/servoTool/) |
+| Pole Placement | Transformation Tool | [pole_placement/transformationTool](https://pablomarcel.github.io/digital-control/pole_placement/transformationTool/) |
+| Polynomial Equations | Polynomial Tool | [polynomial_equations/polynomialTool](https://pablomarcel.github.io/digital-control/polynomial_equations/polynomialTool/) |
+| Quadratic Control | Quadratic Tool | [quadratic_control/quadraticTool](https://pablomarcel.github.io/digital-control/quadratic_control/quadraticTool/) |
+| RST Controllers | RST Plot Tool | [rst_controllers/rstPlotTool](https://pablomarcel.github.io/digital-control/rst_controllers/rstPlotTool/) |
+| RST Controllers | RST Tool | [rst_controllers/rstTool](https://pablomarcel.github.io/digital-control/rst_controllers/rstTool/) |
+| State Space | Liapunov Tool | [state_space/liapunovTool](https://pablomarcel.github.io/digital-control/state_space/liapunovTool/) |
+| State Space | State Converter Tool | [state_space/stateConverterTool](https://pablomarcel.github.io/digital-control/state_space/stateConverterTool/) |
+| State Space | State Solver Tool | [state_space/stateSolverTool](https://pablomarcel.github.io/digital-control/state_space/stateSolverTool/) |
+| State Space | State Space Tool | [state_space/stateSpaceTool](https://pablomarcel.github.io/digital-control/state_space/stateSpaceTool/) |
+| System Design | Frequency Response Tool | [system_design/frequencyResponseTool](https://pablomarcel.github.io/digital-control/system_design/frequencyResponseTool/) |
+| System Design | Jury Test Tool | [system_design/juryTestTool](https://pablomarcel.github.io/digital-control/system_design/juryTestTool/) |
+| System Design | Z-Grid Tool | [system_design/zGridTool](https://pablomarcel.github.io/digital-control/system_design/zGridTool/) |
+| Z-Plane Analysis | Discrete Response Tool | [z_plane_analysis/discreteResponseTool](https://pablomarcel.github.io/digital-control/z_plane_analysis/discreteResponseTool/) |
+| Z-Transform | Z-Transform Tool | [z_transform/zTransformTool](https://pablomarcel.github.io/digital-control/z_transform/zTransformTool/) |
 
 ## What This Repository Provides
 
 Digital Control is built around repeatable engineering workflows. The repository is designed to help users:
 
-- analyze discrete-time systems from transfer-function, polynomial, and state-space viewpoints;
+- analyze discrete-time systems from transfer-function, polynomial, z-plane, and state-space viewpoints;
 - simulate sampled-data behavior, digital responses, converters, timing traces, and controller behavior;
 - design and inspect control structures such as pole-placement controllers, observers, RST controllers, Kalman filters, servo systems, and LQR regulators;
 - generate structured outputs for review, documentation, regression testing, and future automation;
@@ -30,7 +59,7 @@ Digital Control is built around repeatable engineering workflows. The repository
 ## Repository Layout
 
 ```text
-intro/
+introduction/
   adcTool/                # Counter and SAR ADC simulators
   dacTool/                # DAC staircase and quantization models
   demuxTool/              # N-way digital demultiplexer models
@@ -38,10 +67,10 @@ intro/
   vcdTool/                # VCD validation, merge, and summary utilities
   zohTool/                # Zero-order hold and droop models
 
-kalmanFilters/
+kalman_filters/
   kalmanFilterTool/       # Discrete Kalman filtering workflows
 
-polePlacement/
+pole_placement/
   controllabilityTool/    # Controllability tests, rank checks, and Gramians
   observabilityTool/      # Observability tests and observable canonical form
   observerTool/           # Observer and estimator design workflows
@@ -49,31 +78,31 @@ polePlacement/
   servoTool/              # Integral-action servo design
   transformationTool/     # Canonical-form transformations
 
-polynomialEquations/
+polynomial_equations/
   polynomialTool/         # Polynomial and Diophantine-equation workflows
 
-quadraticControl/
+quadratic_control/
   quadraticTool/          # Finite-horizon and steady-state discrete LQR
 
-rstControllers/
-  rstTool/                # RST controller synthesis
+rst_controllers/
   rstPlotTool/            # RST response plotting and visualization
+  rstTool/                # RST controller synthesis
 
-stateSpace/
-  stateSpaceTool/         # Discrete state-space simulation
+state_space/
+  liapunovTool/           # Discrete Lyapunov stability analysis
   stateConverterTool/     # Transfer-function/state-space conversion and discretization
   stateSolverTool/        # State-transition and response solvers
-  liapunovTool/           # Discrete Lyapunov stability analysis
+  stateSpaceTool/         # Discrete state-space simulation
 
-systemDesign/
+system_design/
   frequencyResponseTool/  # Frequency-response design support
   juryTestTool/           # Jury stability analysis
   zGridTool/              # z-plane design grids and overlays
 
-zPlaneAnalysis/
+z_plane_analysis/
   discreteResponseTool/   # Discrete impulse and step-response analysis
 
-zTransform/
+z_transform/
   zTransformTool/         # Z-transform, inverse Z-transform, and difference equations
 ```
 
@@ -92,6 +121,28 @@ tests/        package-level regression tests
 ```
 
 The exact module names vary by package, but the intent is consistent: keep solver logic separated from command-line parsing, keep examples close to the tool that uses them, and keep generated outputs easy to inspect.
+
+## Tool Families
+
+### Introductory digital-system tools
+
+The `introduction/` packages cover foundational sampled-data and digital-interface concepts: ADC behavior, DAC staircase output, multiplexing and demultiplexing, zero-order hold behavior, and VCD timing-file workflows. These tools are useful for connecting control-system theory to the practical digital signals that feed and actuate real systems.
+
+### Z-transform and z-plane analysis
+
+The `z_transform/` and `z_plane_analysis/` packages support symbolic and numerical workflows around z-transforms, inverse z-transforms, difference equations, impulse response, step response, pole-zero visualization, and response analysis.
+
+### State-space workflows
+
+The `state_space/` packages cover simulation, state-transition solutions, transfer-function/state-space conversion, discretization, and discrete Lyapunov stability analysis. They are intended to make state-space calculations inspectable from the command line rather than hidden inside notebooks.
+
+### Pole placement, observers, and servo design
+
+The `pole_placement/` packages collect design and verification workflows for controllability, observability, canonical transformations, pole placement, observer construction, and integral-action servo design.
+
+### RST, LQR, Kalman, and system design
+
+The RST, quadratic-control, Kalman-filter, and system-design packages cover higher-level controller workflows: RST synthesis, response plotting, discrete LQR, Kalman filtering, Jury stability, frequency-response design, and z-grid design overlays.
 
 ## Design Philosophy
 
@@ -123,8 +174,8 @@ The repository treats numerical behavior as something that should be checked, no
 
 ```bash
 # Clone the repository
-git clone https://github.com/pablomarcel/control-digitalControl.git
-cd control-digitalControl
+git clone https://github.com/pablomarcel/digital-control.git
+cd digital-control
 
 # Create and activate a virtual environment
 python -m venv .venv
@@ -138,7 +189,7 @@ pip install -r requirements.txt
 Run a package-level command:
 
 ```bash
-cd systemDesign/zGridTool
+cd system_design/zGridTool
 python cli.py --help
 ```
 
@@ -149,7 +200,7 @@ Then open that package's `RUNS.md` file for tested example commands.
 A normal package workflow looks like this:
 
 ```bash
-cd systemDesign/zGridTool
+cd system_design/zGridTool
 python cli.py --help
 # choose a tested command from RUNS.md
 # run the example
@@ -187,9 +238,9 @@ pytest
 Run tests for an individual package:
 
 ```bash
-pytest systemDesign/zGridTool/tests \
+pytest system_design/zGridTool/tests \
   --cov \
-  --cov-config=systemDesign/zGridTool/.coveragerc \
+  --cov-config=system_design/zGridTool/.coveragerc \
   --cov-report=term-missing
 ```
 
@@ -202,6 +253,8 @@ The repository includes Sphinx-based documentation published through GitHub Page
 ```bash
 sphinx-build -b html path/to/docs path/to/docs/_build/html
 ```
+
+Several package CLIs include a `sphinx-skel` helper that creates a conservative documentation skeleton with Sphinx-safe `.rst` files, `_static/.gitkeep`, `_templates/.gitkeep`, a minimal `Makefile`, and module discovery that only documents importable modules.
 
 When updating a package, keep its CLI help, examples, and documentation aligned so that command behavior remains discoverable.
 
@@ -216,7 +269,8 @@ When adding or modifying a tool:
 - write tests for new calculations, edge cases, and regression-sensitive behavior;
 - prefer structured outputs that can be inspected programmatically;
 - avoid hidden state and make file paths explicit;
-- update documentation when flags, examples, or output conventions change.
+- update documentation when flags, examples, or output conventions change;
+- keep docstrings conservative enough for Sphinx autodoc and docutils.
 
 ## Requirements
 
@@ -244,7 +298,8 @@ Before opening a pull request:
 - update `RUNS.md` if command behavior changed;
 - document new CLI flags in `--help` text;
 - include or update example input files when adding solver paths;
-- verify that generated files are written to the expected `out/` folder.
+- verify that generated files are written to the expected `out/` folder;
+- verify the relevant documentation page still builds and resolves under `https://pablomarcel.github.io/digital-control/`.
 
 ## License
 
