@@ -2,13 +2,13 @@
 # -*- coding: utf-8 -*-
 """Command-line interface for :mod:`introduction.demuxTool`.
 
-This CLI preserves the original demultiplexer run workflow while adding a
-small, conservative Sphinx skeleton generator for GitHub Pages deployments.
+The CLI preserves the original demultiplexer workflow while adding a small,
+conservative Sphinx skeleton generator for GitHub Pages deployments.
 """
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -37,28 +37,36 @@ _REQUIRED_MODULES = [
 ]
 _OPTIONAL_MODULES = [
     "introduction.demuxTool.core",
-    "introduction.demuxTool.design",
     "introduction.demuxTool.io",
     "introduction.demuxTool.utils",
+    "introduction.demuxTool.design",
     "introduction.demuxTool.plotting",
 ]
+_COMMANDS = {"run", "sphinx-skel", "-h", "--help"}
+
+
+def _module_importable(modname: str) -> bool:
+    """Return ``True`` only when a module can be imported by Sphinx.
+
+    ``importlib.util.find_spec()`` is not enough for autodoc safety because it
+    only checks that a module exists; it does not execute the module body. The
+    deploy failure happened because autodoc found modules that later failed at
+    import time. This helper performs the actual import and treats failures as a
+    signal to omit the module from generated ``api.rst``.
+    """
+    try:
+        importlib.import_module(modname)
+    except Exception:
+        return False
+    return True
 
 
 def _available_modules() -> list[str]:
-    """Return package modules that Python can actually import.
-
-    Required modules are always included because they define the public CLI path.
-    Optional modules are included only when :func:`importlib.util.find_spec` can
-    locate them. This keeps generated ``api.rst`` files conservative and avoids
-    Sphinx failures for modules that do not exist in small packages.
-    """
-    modules = list(_REQUIRED_MODULES)
-    for mod in _OPTIONAL_MODULES:
-        try:
-            if importlib.util.find_spec(mod) is not None:
-                modules.append(mod)
-        except (ImportError, AttributeError, ModuleNotFoundError, ValueError):
-            continue
+    """Return package modules that Python can actually import."""
+    modules: list[str] = []
+    for mod in [*_REQUIRED_MODULES, *_OPTIONAL_MODULES]:
+        if _module_importable(mod):
+            modules.append(mod)
     return modules
 
 
@@ -113,6 +121,7 @@ html_theme = "furo"
 html_static_path = ["_static"]
 
 autodoc_typehints = "description"
+autodoc_mock_imports = ["pyrtl", "graphviz"]
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
 '''
@@ -132,7 +141,7 @@ def _build_index_rst() -> str:
 
 
 def _build_api_rst() -> str:
-    """Build an API page that documents only available modules."""
+    """Build an API page that documents only importable modules."""
     parts: list[str] = [_rst_heading("API Reference", "=")]
     for mod in _available_modules():
         parts.append(_rst_heading(mod, "-"))
@@ -175,7 +184,7 @@ def _write_sphinx_skeleton(dest: Path, *, force: bool = False) -> list[Path]:
 
 
 def _add_run_arguments(ap: argparse.ArgumentParser) -> None:
-    """Add the original demux simulation arguments to a parser."""
+    """Add the demux simulation arguments to a parser."""
     ap.add_argument("--csv", help="Input CSV with columns: sel,x.")
     ap.add_argument(
         "--json",
@@ -294,21 +303,28 @@ def _run_sphinx_skel(args: argparse.Namespace) -> int:
     return 0
 
 
+def _normalize_legacy_argv(argv: list[str]) -> list[str]:
+    """Preserve historical no-subcommand usage by inserting ``run``.
+
+    Examples
+    --------
+    ``python cli.py --json '[...]'`` becomes ``python cli.py run --json '[...]'``.
+    """
+    if not argv:
+        return argv
+    if argv[0] in _COMMANDS:
+        return argv
+    return ["run", *argv]
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the demuxTool command-line interface."""
+    raw_args = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(_normalize_legacy_argv(raw_args))
 
     if args.cmd == "sphinx-skel":
         return _run_sphinx_skel(args)
-
-    if args.cmd is None:
-        legacy_args = list(sys.argv[1:] if argv is None else argv)
-        if legacy_args and legacy_args[0] not in {"run", "sphinx-skel", "-h", "--help"}:
-            args = parser.parse_args(["run", *legacy_args])
-        else:
-            parser.print_help()
-            return 0
 
     if args.cmd == "run":
         try:
