@@ -31,7 +31,6 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install sphinx furo || pip install sphinx alabaster
-          # If your project has a pyproject.toml/setup.cfg, this will help:
           if [ -f pyproject.toml ] || [ -f setup.cfg ] || [ -f setup.py ]; then
             pip install -e .
           fi
@@ -40,35 +39,606 @@ jobs:
 
       - name: Build all Sphinx projects under */docs
         env:
-          # Make the source tree importable even if editable install is skipped
           PYTHONPATH: ${{ github.workspace }}
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t DOCS < <(find . -type d -name docs -maxdepth 4 | sort)
+
+          mapfile -t DOCS < <(find . -maxdepth 4 -type d -name docs | sort)
+
+          if [ "${#DOCS[@]}" -eq 0 ]; then
+            echo "No Sphinx docs folders were found."
+            exit 1
+          fi
+
           for D in "${DOCS[@]}"; do
             echo "==> Building $D"
-            # -W makes warnings fail the job so we don't silently publish blanks
-            sphinx-build -b html -W --keep-going "$D" "$D/_build/html"
+            if [ -f "$D/Makefile" ]; then
+              make -C "$D" html || sphinx-build -b html -W --keep-going "$D" "$D/_build/html"
+            else
+              sphinx-build -b html -W --keep-going "$D" "$D/_build/html"
+            fi
           done
 
       - name: Assemble site folder
         shell: bash
         run: |
+          set -euo pipefail
+
           mkdir -p _site
-          mapfile -t DOCS < <(find . -type d -name docs -maxdepth 4 | sort)
-          INDEX="_site/index.html"
-          echo '<!doctype html><meta charset="utf-8"><title>Docs</title><h1>Docs</h1><ul>' > "$INDEX"
+          touch _site/.nojekyll
+
+          mapfile -t DOCS < <(find . -maxdepth 4 -type d -name docs | sort)
+
           for D in "${DOCS[@]}"; do
             PKG_PATH="$(dirname "$D")"
-            DEST="_site/${PKG_PATH#./}"
+            ROUTE="${PKG_PATH#./}"
+            DEST="_site/$ROUTE"
+
             if [ -d "$D/_build/html" ]; then
+              echo "==> Copying $ROUTE"
               mkdir -p "$DEST"
               cp -R "$D/_build/html/"* "$DEST/"
-              echo "<li><a href='${PKG_PATH#./}/'>${PKG_PATH#./}/</a></li>" >> "$INDEX"
+            else
+              echo "==> No built docs for $ROUTE"
             fi
           done
-          echo '</ul>' >> "$INDEX"
+
+          # Modern landing page for the Digital Control documentation portal.
+          cat > _site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta name="color-scheme" content="dark light">
+            <title>Digital Control Docs</title>
+            <style>
+              :root {
+                --bg-0: #050816;
+                --bg-1: #08111f;
+                --bg-2: #111827;
+                --card: rgba(255, 255, 255, 0.075);
+                --card-strong: rgba(255, 255, 255, 0.115);
+                --text: #f8fafc;
+                --muted: #aab6c8;
+                --soft: #dbeafe;
+                --accent: #38bdf8;
+                --accent-2: #818cf8;
+                --accent-3: #22c55e;
+                --accent-4: #f59e0b;
+                --border: rgba(255, 255, 255, 0.14);
+                --shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+              }
+
+              * { box-sizing: border-box; }
+
+              html {
+                min-height: 100%;
+                background: var(--bg-0);
+              }
+
+              body {
+                min-height: 100%;
+                margin: 0;
+                color: var(--text);
+                font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                background:
+                  radial-gradient(circle at 10% 10%, rgba(56, 189, 248, 0.25), transparent 29rem),
+                  radial-gradient(circle at 86% 8%, rgba(129, 140, 248, 0.22), transparent 32rem),
+                  radial-gradient(circle at 72% 92%, rgba(34, 197, 94, 0.13), transparent 30rem),
+                  linear-gradient(135deg, var(--bg-0), var(--bg-1) 42%, var(--bg-2));
+              }
+
+              body::before {
+                content: "";
+                position: fixed;
+                inset: 0;
+                pointer-events: none;
+                background-image:
+                  linear-gradient(rgba(255,255,255,0.034) 1px, transparent 1px),
+                  linear-gradient(90deg, rgba(255,255,255,0.034) 1px, transparent 1px);
+                background-size: 76px 76px;
+                mask-image: linear-gradient(to bottom, rgba(0,0,0,0.82), transparent 80%);
+              }
+
+              a { color: inherit; }
+
+              .shell {
+                position: relative;
+                width: min(1200px, calc(100% - 40px));
+                margin: 0 auto;
+                padding: 34px 0 64px;
+              }
+
+              .nav {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 16px;
+                margin-bottom: 72px;
+              }
+
+              .brand {
+                display: inline-flex;
+                align-items: center;
+                gap: 12px;
+                font-weight: 850;
+                letter-spacing: -0.035em;
+              }
+
+              .brand-mark {
+                display: grid;
+                place-items: center;
+                width: 42px;
+                height: 42px;
+                border: 1px solid var(--border);
+                border-radius: 14px;
+                background: linear-gradient(145deg, rgba(56,189,248,0.28), rgba(129,140,248,0.18));
+                box-shadow: 0 16px 48px rgba(56, 189, 248, 0.12);
+              }
+
+              .brand-mark svg {
+                width: 24px;
+                height: 24px;
+              }
+
+              .nav-pill {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 10px 14px;
+                border: 1px solid var(--border);
+                border-radius: 999px;
+                color: var(--soft);
+                background: rgba(255,255,255,0.055);
+                backdrop-filter: blur(14px);
+                text-decoration: none;
+                font-size: 0.93rem;
+              }
+
+              .hero {
+                display: grid;
+                grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+                gap: 28px;
+                align-items: stretch;
+                margin-bottom: 34px;
+              }
+
+              .hero-copy { padding: 8px 0 0; }
+
+              .eyebrow {
+                display: inline-flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 18px;
+                padding: 8px 12px;
+                border: 1px solid rgba(56, 189, 248, 0.24);
+                border-radius: 999px;
+                color: #d6f3ff;
+                background: rgba(56, 189, 248, 0.08);
+                font-size: 0.92rem;
+                font-weight: 700;
+              }
+
+              .dot {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--accent-3);
+                box-shadow: 0 0 22px var(--accent-3);
+              }
+
+              h1 {
+                max-width: 860px;
+                margin: 0;
+                font-size: clamp(3rem, 8vw, 6.8rem);
+                line-height: 0.92;
+                letter-spacing: -0.085em;
+              }
+
+              .gradient-text {
+                background: linear-gradient(90deg, #ffffff, #dbeafe 34%, #93c5fd 66%, #c4b5fd);
+                -webkit-background-clip: text;
+                background-clip: text;
+                color: transparent;
+              }
+
+              .lead {
+                max-width: 710px;
+                margin: 26px 0 0;
+                color: var(--muted);
+                font-size: clamp(1.05rem, 2.1vw, 1.34rem);
+                line-height: 1.65;
+              }
+
+              .actions {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 12px;
+                margin-top: 30px;
+              }
+
+              .button {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 10px;
+                min-height: 46px;
+                padding: 0 18px;
+                border-radius: 999px;
+                border: 1px solid rgba(255,255,255,0.16);
+                background: rgba(255,255,255,0.075);
+                color: var(--text);
+                text-decoration: none;
+                font-weight: 780;
+                backdrop-filter: blur(12px);
+                transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+              }
+
+              .button.primary {
+                border-color: rgba(56, 189, 248, 0.44);
+                background: linear-gradient(135deg, rgba(56, 189, 248, 0.28), rgba(129, 140, 248, 0.18));
+              }
+
+              .button:hover {
+                transform: translateY(-2px);
+                border-color: rgba(255,255,255,0.36);
+                background: rgba(255,255,255,0.12);
+              }
+
+              .panel {
+                position: relative;
+                overflow: hidden;
+                padding: 24px;
+                border: 1px solid var(--border);
+                border-radius: 32px;
+                background:
+                  linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06)),
+                  rgba(255,255,255,0.055);
+                box-shadow: var(--shadow);
+                backdrop-filter: blur(18px);
+              }
+
+              .panel::after {
+                content: "";
+                position: absolute;
+                width: 230px;
+                height: 230px;
+                right: -80px;
+                top: -80px;
+                border-radius: 50%;
+                background: radial-gradient(circle, rgba(56, 189, 248, 0.22), transparent 68%);
+              }
+
+              .panel-content {
+                position: relative;
+                z-index: 1;
+              }
+
+              .panel-title {
+                margin: 0 0 14px;
+                color: var(--soft);
+                font-weight: 850;
+                letter-spacing: -0.03em;
+              }
+
+              .metric-grid {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 12px;
+                margin: 18px 0 20px;
+              }
+
+              .metric {
+                padding: 16px;
+                border: 1px solid rgba(255,255,255,0.12);
+                border-radius: 20px;
+                background: rgba(0,0,0,0.18);
+              }
+
+              .metric strong {
+                display: block;
+                font-size: 1.75rem;
+                letter-spacing: -0.06em;
+              }
+
+              .metric span {
+                display: block;
+                margin-top: 3px;
+                color: var(--muted);
+                font-size: 0.9rem;
+              }
+
+              .code-card {
+                margin-top: 14px;
+                padding: 16px;
+                border: 1px solid rgba(56, 189, 248, 0.18);
+                border-radius: 18px;
+                color: #d9f6ff;
+                background: rgba(3, 7, 18, 0.58);
+                font: 0.88rem/1.7 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+                overflow-x: auto;
+              }
+
+              .section-head {
+                display: flex;
+                align-items: end;
+                justify-content: space-between;
+                gap: 18px;
+                margin: 48px 0 18px;
+              }
+
+              h2 {
+                margin: 0;
+                font-size: clamp(1.7rem, 3vw, 2.4rem);
+                letter-spacing: -0.055em;
+              }
+
+              .section-head p {
+                max-width: 560px;
+                margin: 0;
+                color: var(--muted);
+                line-height: 1.55;
+              }
+
+              .group {
+                margin-top: 26px;
+              }
+
+              .group-title {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin: 0 0 14px;
+                color: var(--soft);
+                font-size: 0.95rem;
+                font-weight: 850;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+              }
+
+              .group-title::before {
+                content: "";
+                width: 10px;
+                height: 10px;
+                border-radius: 999px;
+                background: var(--accent);
+                box-shadow: 0 0 20px rgba(56, 189, 248, 0.8);
+              }
+
+              .grid {
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 16px;
+              }
+
+              .card {
+                position: relative;
+                display: flex;
+                flex-direction: column;
+                min-height: 180px;
+                padding: 20px;
+                overflow: hidden;
+                border: 1px solid var(--border);
+                border-radius: 26px;
+                background: var(--card);
+                color: var(--text);
+                text-decoration: none;
+                box-shadow: 0 18px 55px rgba(0, 0, 0, 0.18);
+                backdrop-filter: blur(14px);
+                transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+              }
+
+              .card::before {
+                content: "";
+                position: absolute;
+                inset: 0;
+                opacity: 0;
+                background: radial-gradient(circle at 20% 0%, rgba(56,189,248,0.24), transparent 42%),
+                            linear-gradient(135deg, rgba(255,255,255,0.10), transparent 42%);
+                transition: opacity 180ms ease;
+              }
+
+              .card:hover {
+                transform: translateY(-5px);
+                border-color: rgba(56, 189, 248, 0.5);
+                background: var(--card-strong);
+                box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+              }
+
+              .card:hover::before { opacity: 1; }
+
+              .card-top,
+              .card-bottom {
+                position: relative;
+                z-index: 1;
+              }
+
+              .icon {
+                display: grid;
+                place-items: center;
+                width: 42px;
+                height: 42px;
+                margin-bottom: 16px;
+                border-radius: 16px;
+                background: linear-gradient(135deg, rgba(56, 189, 248, 0.22), rgba(129, 140, 248, 0.16));
+                border: 1px solid rgba(255,255,255,0.12);
+                color: #e8f8ff;
+                font-weight: 900;
+              }
+
+              .name {
+                display: block;
+                margin-bottom: 8px;
+                font-size: 1.08rem;
+                font-weight: 850;
+                letter-spacing: -0.035em;
+              }
+
+              .desc {
+                display: block;
+                color: var(--muted);
+                line-height: 1.48;
+              }
+
+              .card-bottom {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 14px;
+                margin-top: auto;
+                padding-top: 22px;
+                color: #bdeaff;
+                font-size: 0.92rem;
+                font-weight: 750;
+              }
+
+              .arrow {
+                display: grid;
+                place-items: center;
+                width: 30px;
+                height: 30px;
+                border-radius: 999px;
+                background: rgba(56, 189, 248, 0.12);
+              }
+
+              footer {
+                margin-top: 46px;
+                padding: 22px 0 0;
+                color: rgba(218, 231, 255, 0.64);
+                border-top: 1px solid rgba(255,255,255,0.10);
+                font-size: 0.95rem;
+              }
+
+              @media (max-width: 960px) {
+                .hero { grid-template-columns: 1fr; margin-bottom: 22px; }
+                .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+              }
+
+              @media (max-width: 640px) {
+                .shell { width: min(100% - 28px, 1200px); padding-top: 22px; }
+                .nav { margin-bottom: 42px; }
+                .nav-pill { display: none; }
+                .panel { padding: 20px; border-radius: 26px; }
+                .metric-grid, .grid { grid-template-columns: 1fr; }
+                .section-head { display: block; }
+                .section-head p { margin-top: 10px; }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="shell">
+              <nav class="nav" aria-label="Page navigation">
+                <div class="brand">
+                  <span class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M4 15.5c3.8-7.7 7.8-7.7 16 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                      <path d="M4 8.5c3.8 7.7 7.8 7.7 16 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                      <path d="M7.5 12h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                  </span>
+                  <span>Digital Control Docs</span>
+                </div>
+                <a class="nav-pill" href="zTransform/zTransformTool/">Start with Z-transform →</a>
+              </nav>
+
+              <section class="hero">
+                <div class="hero-copy">
+                  <div class="eyebrow"><span class="dot"></span> Python discrete-control documentation</div>
+                  <h1><span class="gradient-text">Digital control docs</span></h1>
+                  <p class="lead">
+                    API references for the Digital Control package suite: z-transforms, z-plane analysis,
+                    state-space workflows, pole placement, observers, Kalman filtering, RST design,
+                    LQR, stability tests, converter models, and digital-system utilities.
+                  </p>
+                  <div class="actions">
+                    <a class="button primary" href="zTransform/zTransformTool/">Browse Z-transform docs →</a>
+                    <a class="button" href="stateSpace/stateSpaceTool/">Open state-space docs</a>
+                  </div>
+                </div>
+
+                <aside class="panel" aria-label="Documentation summary">
+                  <div class="panel-content">
+                    <p class="panel-title">Toolkit map</p>
+                    <div class="metric-grid">
+                      <div class="metric"><strong>24</strong><span>documented tool folders</span></div>
+                      <div class="metric"><strong>API</strong><span>Sphinx references</span></div>
+                      <div class="metric"><strong>CLI</strong><span>repeatable workflows</span></div>
+                      <div class="metric"><strong>z</strong><span>discrete-time focus</span></div>
+                    </div>
+                    <div class="code-card">
+                      python -m zTransform.zTransformTool.cli sphinx-skel zTransform/zTransformTool/docs<br>
+                      sphinx-build -b html zTransform/zTransformTool/docs zTransform/zTransformTool/docs/_build/html
+                    </div>
+                  </div>
+                </aside>
+              </section>
+
+              <section aria-labelledby="packages-title">
+                <div class="section-head">
+                  <div><h2 id="packages-title">Package documentation</h2></div>
+                  <p>Choose a tool family below. Each card opens the package-level Sphinx site generated during the GitHub Pages build.</p>
+                </div>
+
+                <div class="group">
+                  <h3 class="group-title">Introductory digital systems</h3>
+                  <div class="grid">
+                    <a class="card" href="intro/adcTool/"><div class="card-top"><span class="icon">ADC</span><span class="name">ADC Tool</span><span class="desc">Counter and SAR analog-to-digital converter simulation workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="intro/dacTool/"><div class="card-top"><span class="icon">DAC</span><span class="name">DAC Tool</span><span class="desc">Digital-to-analog conversion, staircase behavior, and quantization models.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="intro/demuxTool/"><div class="card-top"><span class="icon">DMX</span><span class="name">Demux Tool</span><span class="desc">N-way digital demultiplexer modeling and validation helpers.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="intro/muxTool/"><div class="card-top"><span class="icon">MUX</span><span class="name">Mux Tool</span><span class="desc">N-way digital multiplexer models and CLI workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="intro/vcdTool/"><div class="card-top"><span class="icon">VCD</span><span class="name">VCD Tool</span><span class="desc">VCD validation, merge, and summary tools for digital traces.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="intro/zohTool/"><div class="card-top"><span class="icon">ZOH</span><span class="name">ZOH Tool</span><span class="desc">Zero-order hold behavior, droop modeling, and sampled-signal utilities.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                  </div>
+                </div>
+
+                <div class="group">
+                  <h3 class="group-title">Transforms, response, and system design</h3>
+                  <div class="grid">
+                    <a class="card" href="zTransform/zTransformTool/"><div class="card-top"><span class="icon">Z</span><span class="name">Z-Transform Tool</span><span class="desc">Z-transform, inverse Z-transform, series expansion, and difference-equation workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="zPlaneAnalysis/discreteResponseTool/"><div class="card-top"><span class="icon">y[k]</span><span class="name">Discrete Response Tool</span><span class="desc">Discrete impulse and step response analysis for digital systems.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="systemDesign/frequencyResponseTool/"><div class="card-top"><span class="icon">B</span><span class="name">Frequency Response Tool</span><span class="desc">Frequency-response design support and visualization utilities.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="systemDesign/juryTestTool/"><div class="card-top"><span class="icon">J</span><span class="name">Jury Test Tool</span><span class="desc">Jury stability analysis for discrete-time characteristic polynomials.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="systemDesign/zGridTool/"><div class="card-top"><span class="icon">ζ</span><span class="name">Z-Grid Tool</span><span class="desc">Z-plane design grids, overlays, and discrete-control visualization.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="polynomialEquations/polynomialTool/"><div class="card-top"><span class="icon">P</span><span class="name">Polynomial Tool</span><span class="desc">Polynomial and Diophantine-equation workflows for controller synthesis.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                  </div>
+                </div>
+
+                <div class="group">
+                  <h3 class="group-title">State-space, pole placement, and observers</h3>
+                  <div class="grid">
+                    <a class="card" href="stateSpace/stateSpaceTool/"><div class="card-top"><span class="icon">A</span><span class="name">State-Space Tool</span><span class="desc">Discrete state-space simulation and analysis workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="stateSpace/stateConverterTool/"><div class="card-top"><span class="icon">TF</span><span class="name">State Converter Tool</span><span class="desc">Transfer-function/state-space conversion and discretization tools.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="stateSpace/stateSolverTool/"><div class="card-top"><span class="icon">Φ</span><span class="name">State Solver Tool</span><span class="desc">State-transition and response solvers for discrete systems.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="stateSpace/liapunovTool/"><div class="card-top"><span class="icon">V</span><span class="name">Liapunov Tool</span><span class="desc">Discrete Lyapunov stability analysis and matrix-equation workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="polePlacement/controllabilityTool/"><div class="card-top"><span class="icon">Co</span><span class="name">Controllability Tool</span><span class="desc">Controllability tests, rank checks, and Gramian calculations.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="polePlacement/observabilityTool/"><div class="card-top"><span class="icon">Ob</span><span class="name">Observability Tool</span><span class="desc">Observability tests and observable canonical-form workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="polePlacement/poleTool/"><div class="card-top"><span class="icon">λ</span><span class="name">Pole Tool</span><span class="desc">Discrete pole-placement methods and closed-loop design utilities.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="polePlacement/observerTool/"><div class="card-top"><span class="icon">L</span><span class="name">Observer Tool</span><span class="desc">Observer and estimator design workflows for discrete state models.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="polePlacement/servoTool/"><div class="card-top"><span class="icon">I</span><span class="name">Servo Tool</span><span class="desc">Integral-action servo design and tracking-oriented workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="polePlacement/transformationTool/"><div class="card-top"><span class="icon">T</span><span class="name">Transformation Tool</span><span class="desc">Canonical-form transformations and coordinate-change utilities.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                  </div>
+                </div>
+
+                <div class="group">
+                  <h3 class="group-title">Optimal, stochastic, and polynomial controllers</h3>
+                  <div class="grid">
+                    <a class="card" href="kalmanFilters/kalmanFilterTool/"><div class="card-top"><span class="icon">KF</span><span class="name">Kalman Filter Tool</span><span class="desc">Discrete Kalman filtering, prediction, correction, and estimator workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="quadraticControl/quadraticTool/"><div class="card-top"><span class="icon">LQR</span><span class="name">Quadratic Tool</span><span class="desc">Finite-horizon and steady-state discrete LQR analysis.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="rstControllers/rstTool/"><div class="card-top"><span class="icon">RST</span><span class="name">RST Tool</span><span class="desc">RST controller synthesis and polynomial controller design workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="rstControllers/rstPlotTool/"><div class="card-top"><span class="icon">Plot</span><span class="name">RST Plot Tool</span><span class="desc">RST response plotting, visualization, and report-oriented outputs.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                  </div>
+                </div>
+              </section>
+
+              <footer>
+                Built with Sphinx and GitHub Pages from package-level Digital Control documentation folders.
+              </footer>
+            </div>
+          </body>
+          </html>
+          HTML
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
