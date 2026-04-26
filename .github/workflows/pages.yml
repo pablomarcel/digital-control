@@ -37,7 +37,7 @@ jobs:
         env:
           PIP_DISABLE_PIP_VERSION_CHECK: 1
 
-      - name: Build all Sphinx projects under */docs
+      - name: Build all Sphinx projects under package docs folders
         env:
           PYTHONPATH: ${{ github.workspace }}
         shell: bash
@@ -85,6 +85,10 @@ jobs:
           done
 
           # Modern landing page for the Digital Control documentation portal.
+          # Routes below intentionally use the canonical underscore package folders:
+          # introduction, kalman_filters, pole_placement, polynomial_equations,
+          # quadratic_control, rst_controllers, state_space, system_design,
+          # z_plane_analysis, and z_transform.
           cat > _site/index.html <<'HTML'
           <!doctype html>
           <html lang="en">
@@ -540,7 +544,7 @@ jobs:
                   </span>
                   <span>Digital Control Docs</span>
                 </div>
-                <a class="nav-pill" href="zTransform/zTransformTool/">Start with Z-transform →</a>
+                <a class="nav-pill" href="z_transform/zTransformTool/">Start with Z-transform →</a>
               </nav>
 
               <section class="hero">
@@ -553,8 +557,8 @@ jobs:
                     LQR, stability tests, converter models, and digital-system utilities.
                   </p>
                   <div class="actions">
-                    <a class="button primary" href="zTransform/zTransformTool/">Browse Z-transform docs →</a>
-                    <a class="button" href="stateSpace/stateSpaceTool/">Open state-space docs</a>
+                    <a class="button primary" href="z_transform/zTransformTool/">Browse Z-transform docs →</a>
+                    <a class="button" href="state_space/stateSpaceTool/">Open state-space docs</a>
                   </div>
                 </div>
 
@@ -568,8 +572,8 @@ jobs:
                       <div class="metric"><strong>z</strong><span>discrete-time focus</span></div>
                     </div>
                     <div class="code-card">
-                      python -m zTransform.zTransformTool.cli sphinx-skel zTransform/zTransformTool/docs<br>
-                      sphinx-build -b html zTransform/zTransformTool/docs zTransform/zTransformTool/docs/_build/html
+                      python -m z_transform.zTransformTool.cli sphinx-skel z_transform/zTransformTool/docs<br>
+                      sphinx-build -b html z_transform/zTransformTool/docs z_transform/zTransformTool/docs/_build/html
                     </div>
                   </div>
                 </aside>
@@ -584,56 +588,56 @@ jobs:
                 <div class="group">
                   <h3 class="group-title">Introductory digital systems</h3>
                   <div class="grid">
-                    <a class="card" href="intro/adcTool/"><div class="card-top"><span class="icon">ADC</span><span class="name">ADC Tool</span><span class="desc">Counter and SAR analog-to-digital converter simulation workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="intro/dacTool/"><div class="card-top"><span class="icon">DAC</span><span class="name">DAC Tool</span><span class="desc">Digital-to-analog conversion, staircase behavior, and quantization models.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="intro/demuxTool/"><div class="card-top"><span class="icon">DMX</span><span class="name">Demux Tool</span><span class="desc">N-way digital demultiplexer modeling and validation helpers.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="intro/muxTool/"><div class="card-top"><span class="icon">MUX</span><span class="name">Mux Tool</span><span class="desc">N-way digital multiplexer models and CLI workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="intro/vcdTool/"><div class="card-top"><span class="icon">VCD</span><span class="name">VCD Tool</span><span class="desc">VCD validation, merge, and summary tools for digital traces.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="intro/zohTool/"><div class="card-top"><span class="icon">ZOH</span><span class="name">ZOH Tool</span><span class="desc">Zero-order hold behavior, droop modeling, and sampled-signal utilities.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="introduction/adcTool/"><div class="card-top"><span class="icon">ADC</span><span class="name">ADC Tool</span><span class="desc">Counter and SAR analog-to-digital converter simulation workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="introduction/dacTool/"><div class="card-top"><span class="icon">DAC</span><span class="name">DAC Tool</span><span class="desc">Digital-to-analog conversion, staircase behavior, and quantization models.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="introduction/demuxTool/"><div class="card-top"><span class="icon">DMX</span><span class="name">Demux Tool</span><span class="desc">N-way digital demultiplexer modeling and validation helpers.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="introduction/muxTool/"><div class="card-top"><span class="icon">MUX</span><span class="name">Mux Tool</span><span class="desc">N-way digital multiplexer models and CLI workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="introduction/vcdTool/"><div class="card-top"><span class="icon">VCD</span><span class="name">VCD Tool</span><span class="desc">VCD validation, merge, and summary tools for digital traces.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="introduction/zohTool/"><div class="card-top"><span class="icon">ZOH</span><span class="name">ZOH Tool</span><span class="desc">Zero-order hold behavior, droop modeling, and sampled-signal utilities.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
                   </div>
                 </div>
 
                 <div class="group">
                   <h3 class="group-title">Transforms, response, and system design</h3>
                   <div class="grid">
-                    <a class="card" href="zTransform/zTransformTool/"><div class="card-top"><span class="icon">Z</span><span class="name">Z-Transform Tool</span><span class="desc">Z-transform, inverse Z-transform, series expansion, and difference-equation workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="zPlaneAnalysis/discreteResponseTool/"><div class="card-top"><span class="icon">y[k]</span><span class="name">Discrete Response Tool</span><span class="desc">Discrete impulse and step response analysis for digital systems.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="systemDesign/frequencyResponseTool/"><div class="card-top"><span class="icon">B</span><span class="name">Frequency Response Tool</span><span class="desc">Frequency-response design support and visualization utilities.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="systemDesign/juryTestTool/"><div class="card-top"><span class="icon">J</span><span class="name">Jury Test Tool</span><span class="desc">Jury stability analysis for discrete-time characteristic polynomials.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="systemDesign/zGridTool/"><div class="card-top"><span class="icon">ζ</span><span class="name">Z-Grid Tool</span><span class="desc">Z-plane design grids, overlays, and discrete-control visualization.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="polynomialEquations/polynomialTool/"><div class="card-top"><span class="icon">P</span><span class="name">Polynomial Tool</span><span class="desc">Polynomial and Diophantine-equation workflows for controller synthesis.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="z_transform/zTransformTool/"><div class="card-top"><span class="icon">Z</span><span class="name">Z-Transform Tool</span><span class="desc">Z-transform, inverse Z-transform, series expansion, and difference-equation workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="z_plane_analysis/discreteResponseTool/"><div class="card-top"><span class="icon">y[k]</span><span class="name">Discrete Response Tool</span><span class="desc">Discrete impulse and step response analysis for digital systems.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="system_design/frequencyResponseTool/"><div class="card-top"><span class="icon">B</span><span class="name">Frequency Response Tool</span><span class="desc">Frequency-response design support and visualization utilities.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="system_design/juryTestTool/"><div class="card-top"><span class="icon">J</span><span class="name">Jury Test Tool</span><span class="desc">Jury stability analysis for discrete-time characteristic polynomials.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="system_design/zGridTool/"><div class="card-top"><span class="icon">ζ</span><span class="name">Z-Grid Tool</span><span class="desc">Z-plane design grids, overlays, and discrete-control visualization.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="polynomial_equations/polynomialTool/"><div class="card-top"><span class="icon">P</span><span class="name">Polynomial Tool</span><span class="desc">Polynomial and Diophantine-equation workflows for controller synthesis.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
                   </div>
                 </div>
 
                 <div class="group">
                   <h3 class="group-title">State-space, pole placement, and observers</h3>
                   <div class="grid">
-                    <a class="card" href="stateSpace/stateSpaceTool/"><div class="card-top"><span class="icon">A</span><span class="name">State-Space Tool</span><span class="desc">Discrete state-space simulation and analysis workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="stateSpace/stateConverterTool/"><div class="card-top"><span class="icon">TF</span><span class="name">State Converter Tool</span><span class="desc">Transfer-function/state-space conversion and discretization tools.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="stateSpace/stateSolverTool/"><div class="card-top"><span class="icon">Φ</span><span class="name">State Solver Tool</span><span class="desc">State-transition and response solvers for discrete systems.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="stateSpace/liapunovTool/"><div class="card-top"><span class="icon">V</span><span class="name">Liapunov Tool</span><span class="desc">Discrete Lyapunov stability analysis and matrix-equation workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="polePlacement/controllabilityTool/"><div class="card-top"><span class="icon">Co</span><span class="name">Controllability Tool</span><span class="desc">Controllability tests, rank checks, and Gramian calculations.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="polePlacement/observabilityTool/"><div class="card-top"><span class="icon">Ob</span><span class="name">Observability Tool</span><span class="desc">Observability tests and observable canonical-form workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="polePlacement/poleTool/"><div class="card-top"><span class="icon">λ</span><span class="name">Pole Tool</span><span class="desc">Discrete pole-placement methods and closed-loop design utilities.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="polePlacement/observerTool/"><div class="card-top"><span class="icon">L</span><span class="name">Observer Tool</span><span class="desc">Observer and estimator design workflows for discrete state models.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="polePlacement/servoTool/"><div class="card-top"><span class="icon">I</span><span class="name">Servo Tool</span><span class="desc">Integral-action servo design and tracking-oriented workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="polePlacement/transformationTool/"><div class="card-top"><span class="icon">T</span><span class="name">Transformation Tool</span><span class="desc">Canonical-form transformations and coordinate-change utilities.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="state_space/stateSpaceTool/"><div class="card-top"><span class="icon">A</span><span class="name">State-Space Tool</span><span class="desc">Discrete state-space simulation and analysis workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="state_space/stateConverterTool/"><div class="card-top"><span class="icon">TF</span><span class="name">State Converter Tool</span><span class="desc">Transfer-function/state-space conversion and discretization tools.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="state_space/stateSolverTool/"><div class="card-top"><span class="icon">Φ</span><span class="name">State Solver Tool</span><span class="desc">State-transition and response solvers for discrete systems.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="state_space/liapunovTool/"><div class="card-top"><span class="icon">V</span><span class="name">Liapunov Tool</span><span class="desc">Discrete Lyapunov stability analysis and matrix-equation workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="pole_placement/controllabilityTool/"><div class="card-top"><span class="icon">Co</span><span class="name">Controllability Tool</span><span class="desc">Controllability tests, rank checks, and Gramian calculations.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="pole_placement/observabilityTool/"><div class="card-top"><span class="icon">Ob</span><span class="name">Observability Tool</span><span class="desc">Observability tests and observable canonical-form workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="pole_placement/poleTool/"><div class="card-top"><span class="icon">λ</span><span class="name">Pole Tool</span><span class="desc">Discrete pole-placement methods and closed-loop design utilities.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="pole_placement/observerTool/"><div class="card-top"><span class="icon">L</span><span class="name">Observer Tool</span><span class="desc">Observer and estimator design workflows for discrete state models.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="pole_placement/servoTool/"><div class="card-top"><span class="icon">I</span><span class="name">Servo Tool</span><span class="desc">Integral-action servo design and tracking-oriented workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="pole_placement/transformationTool/"><div class="card-top"><span class="icon">T</span><span class="name">Transformation Tool</span><span class="desc">Canonical-form transformations and coordinate-change utilities.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
                   </div>
                 </div>
 
                 <div class="group">
                   <h3 class="group-title">Optimal, stochastic, and polynomial controllers</h3>
                   <div class="grid">
-                    <a class="card" href="kalmanFilters/kalmanFilterTool/"><div class="card-top"><span class="icon">KF</span><span class="name">Kalman Filter Tool</span><span class="desc">Discrete Kalman filtering, prediction, correction, and estimator workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="quadraticControl/quadraticTool/"><div class="card-top"><span class="icon">LQR</span><span class="name">Quadratic Tool</span><span class="desc">Finite-horizon and steady-state discrete LQR analysis.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="rstControllers/rstTool/"><div class="card-top"><span class="icon">RST</span><span class="name">RST Tool</span><span class="desc">RST controller synthesis and polynomial controller design workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
-                    <a class="card" href="rstControllers/rstPlotTool/"><div class="card-top"><span class="icon">Plot</span><span class="name">RST Plot Tool</span><span class="desc">RST response plotting, visualization, and report-oriented outputs.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="kalman_filters/kalmanFilterTool/"><div class="card-top"><span class="icon">KF</span><span class="name">Kalman Filter Tool</span><span class="desc">Discrete Kalman filtering, prediction, correction, and estimator workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="quadratic_control/quadraticTool/"><div class="card-top"><span class="icon">LQR</span><span class="name">Quadratic Tool</span><span class="desc">Finite-horizon and steady-state discrete LQR analysis.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="rst_controllers/rstTool/"><div class="card-top"><span class="icon">RST</span><span class="name">RST Tool</span><span class="desc">RST controller synthesis and polynomial controller design workflows.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
+                    <a class="card" href="rst_controllers/rstPlotTool/"><div class="card-top"><span class="icon">Plot</span><span class="name">RST Plot Tool</span><span class="desc">RST response plotting, visualization, and report-oriented outputs.</span></div><div class="card-bottom"><span>Open docs</span><span class="arrow">→</span></div></a>
                   </div>
                 </div>
               </section>
 
               <footer>
-                Built with Sphinx and GitHub Pages from package-level Digital Control documentation folders.
+                Built with Sphinx and GitHub Pages from canonical Digital Control documentation folders.
               </footer>
             </div>
           </body>
