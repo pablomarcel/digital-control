@@ -1,0 +1,32 @@
+{
+  "title": "Double integrator constrained MPC",
+  "analysis_type": "lti_mpc_sim",
+  "plant": "linear_state_space",
+  "dt": 0.1,
+  "model": {
+    "A": [[1.0, 0.1], [0.0, 1.0]],
+    "B": [[0.005], [0.1]],
+    "d": [0.0, 0.0]
+  },
+  "state_names": ["position", "velocity"],
+  "input_names": ["acceleration_command"],
+  "x0": [6.0, 0.0],
+  "x_ref": [0.0, 0.0],
+  "u_ref": [0.0],
+  "horizon": 18,
+  "steps": 70,
+  "weights": {
+    "Q": [8.0, 0.8],
+    "R": [0.04],
+    "P": [20.0, 3.0],
+    "Rd": [0.15]
+  },
+  "constraints": {
+    "u_min": [-2.0],
+    "u_max": [2.0],
+    "du_min": [-0.45],
+    "du_max": [0.45],
+    "x_min": [-10.0, -5.0],
+    "x_max": [10.0, 5.0]
+  }
+}
