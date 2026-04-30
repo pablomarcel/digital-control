@@ -1,0 +1,27 @@
+{
+  "title": "Automotive engine cooling LTV MPC demo",
+  "analysis_type": "ltv_mpc_sim",
+  "plant": "thermal_cooling_4state_demo",
+  "dt": 1.0,
+  "horizon": 12,
+  "steps": 90,
+  "ambient_temp_c": 38.0,
+  "x0": [118.0, 101.0, 110.0, 90.0],
+  "x_ref": [105.0, 92.0, 100.0, 82.0],
+  "state_names": ["wall_temp_c", "coolant_out_c", "block_temp_c", "radiator_out_c"],
+  "input_names": ["pump_command", "fan_command"],
+  "weights": {
+    "Q": [5.0, 8.0, 2.0, 1.0],
+    "R": [0.05, 0.08],
+    "P": [10.0, 14.0, 4.0, 2.0],
+    "Rd": [0.35, 0.45]
+  },
+  "constraints": {
+    "u_min": [0.0, 0.0],
+    "u_max": [1.0, 1.0],
+    "du_min": [-0.12, -0.12],
+    "du_max": [0.12, 0.12],
+    "x_min": [70.0, 60.0, 70.0, 50.0],
+    "x_max": [128.0, 112.0, 122.0, 108.0]
+  }
+}
