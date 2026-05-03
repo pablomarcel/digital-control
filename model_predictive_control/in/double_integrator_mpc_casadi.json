@@ -1,11 +1,15 @@
 {
-  "title": "Double integrator constrained MPC",
+  "title": "Double integrator constrained MPC - CasADi Opti backend",
   "analysis_type": "lti_mpc_sim",
   "plant": "linear_state_space",
   "solver": {
-    "backend": "native_slsqp",
-    "maxiter": 250,
-    "ftol": 1e-08
+    "backend": "casadi_opti",
+    "max_iter": 150,
+    "tol": 1e-08,
+    "acceptable_tol": 1e-06,
+    "print_level": 0,
+    "print_time": false,
+    "expand": false
   },
   "dt": 0.1,
   "model": {
@@ -50,8 +54,8 @@
   "u_ref": [
     0.0
   ],
-  "horizon": 18,
-  "steps": 70,
+  "horizon": 14,
+  "steps": 45,
   "weights": {
     "Q": [
       8.0,

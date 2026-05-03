@@ -4,12 +4,16 @@ from __future__ import annotations
 
 """Core numerical routines for discrete-time model predictive control.
 
-The module intentionally starts with a transparent SciPy-based linear MPC
-implementation. It is meant for learning, experimentation, and automotive
-control prototypes before moving to dedicated production-grade solvers.
+The module intentionally keeps the original transparent SciPy/SLSQP route as
+its default native solver. A separate optional CasADi/Opti route is available
+when an input specification sets ``solver.backend`` to ``"casadi_opti"``.
+
+The native route is useful for learning and debugging the MPC mechanics. The
+CasADi route is useful for experimenting with a Rawlings-style optimization
+formulation without replacing the package architecture.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -33,6 +37,10 @@ except ImportError:  # pragma: no cover
         matrix_weight,
         vector_or_default,
     )
+
+
+NATIVE_BACKENDS = {"native", "native_slsqp", "scipy", "scipy_slsqp", "slsqp"}
+CASADI_BACKENDS = {"casadi", "casadi_opti", "opti", "ipopt", "casadi_ipopt"}
 
 
 @dataclass
@@ -62,6 +70,8 @@ class LinearMPCProblem:
     dt: float = 1.0
     state_names: list[str] | None = None
     input_names: list[str] | None = None
+    solver_backend: str = "native_slsqp"
+    solver_options: dict[str, Any] = field(default_factory=dict)
 
     @property
     def nx(self) -> int:
@@ -72,6 +82,43 @@ class LinearMPCProblem:
         return int(self.B.shape[1])
 
 
+@dataclass(frozen=True)
+class SolverConfig:
+    """Parsed solver configuration from the input specification."""
+
+    backend: str
+    options: dict[str, Any]
+
+
+def parse_solver_config(spec: dict[str, Any]) -> SolverConfig:
+    """Parse and normalize the solver configuration.
+
+    Supported backends are:
+
+    - ``native_slsqp``: the original NumPy/SciPy implementation.
+    - ``casadi_opti``: an optional CasADi Opti/IPOPT implementation.
+    """
+
+    raw = spec.get("solver", {})
+    if isinstance(raw, str):
+        backend = raw
+        options: dict[str, Any] = {}
+    elif isinstance(raw, dict):
+        backend = str(raw.get("backend", raw.get("name", spec.get("backend", "native_slsqp"))))
+        options = {k: v for k, v in raw.items() if k not in {"backend", "name"}}
+    else:
+        raise InputError("solver must be a string or object when provided")
+
+    backend_key = backend.strip().lower().replace("-", "_")
+    if backend_key in NATIVE_BACKENDS:
+        return SolverConfig(backend="native_slsqp", options=options)
+    if backend_key in CASADI_BACKENDS:
+        return SolverConfig(backend="casadi_opti", options=options)
+    raise InputError(
+        f"Unsupported solver backend {backend!r}. Use 'native_slsqp' or 'casadi_opti'."
+    )
+
+
 def parse_problem(spec: dict[str, Any]) -> LinearMPCProblem:
     """Parse a dictionary into a normalized linear MPC problem."""
 
@@ -79,6 +126,7 @@ def parse_problem(spec: dict[str, Any]) -> LinearMPCProblem:
     if plant in {"thermal_cooling_4state_demo", "automotive_thermal_cooling_demo"}:
         spec = build_thermal_cooling_spec(spec)
 
+    solver = parse_solver_config(spec)
     model = spec.get("model", spec)
     if "A" not in model or "B" not in model:
         raise InputError("MPC input requires model.A and model.B matrices")
@@ -144,6 +192,8 @@ def parse_problem(spec: dict[str, Any]) -> LinearMPCProblem:
         dt=float(spec.get("dt", model.get("dt", 1.0))),
         state_names=list(spec.get("state_names", [f"x{i + 1}" for i in range(nx)])),
         input_names=list(spec.get("input_names", [f"u{i + 1}" for i in range(nu)])),
+        solver_backend=solver.backend,
+        solver_options=solver.options,
     )
 
 
@@ -204,8 +254,50 @@ def horizon_cost(problem: LinearMPCProblem, x_start: np.ndarray, U_flat: np.ndar
     return cost
 
 
+
+
+def _coerce_trajectory(value: Any, rows: int, cols: int, name: str) -> np.ndarray:
+    """Coerce solver output into a strict 2-D trajectory array.
+
+    CasADi may return a one-dimensional NumPy array when one dimension is one,
+    for example an input trajectory with one actuator. The rest of the package
+    expects trajectories with shape ``(rows, cols)``. This helper keeps the
+    native and CasADi routes compatible for both SISO and MIMO problems.
+    """
+
+    arr = np.asarray(value, dtype=float)
+
+    if arr.shape == (rows, cols):
+        out = arr.copy()
+    elif arr.shape == (cols, rows):
+        out = arr.T.copy()
+    elif arr.ndim == 1 and cols == 1 and arr.size == rows:
+        out = arr.reshape(rows, 1).copy()
+    elif arr.ndim == 1 and rows == 1 and arr.size == cols:
+        out = arr.reshape(1, cols).copy()
+    elif arr.size == rows * cols:
+        out = arr.reshape(rows, cols).copy()
+    else:
+        raise InputError(f"{name} must have shape {(rows, cols)}; got {arr.shape}")
+
+    if not np.all(np.isfinite(out)):
+        raise InputError(f"{name} contains non-finite values")
+    return out
+
+
+def _coerce_input_plan(problem: LinearMPCProblem, value: Any, name: str = "planned_U") -> np.ndarray:
+    """Return an input plan with shape ``(horizon, nu)``."""
+
+    return _coerce_trajectory(value, problem.horizon, problem.nu, name)
+
+
+def _coerce_state_plan(problem: LinearMPCProblem, value: Any, name: str = "planned_X") -> np.ndarray:
+    """Return a state plan with shape ``(horizon + 1, nx)``."""
+
+    return _coerce_trajectory(value, problem.horizon + 1, problem.nx, name)
+
 def solve_open_loop(problem: LinearMPCProblem, x_start: np.ndarray, time_index: int, u_prev: np.ndarray, warm_start: np.ndarray | None = None) -> dict[str, Any]:
-    """Solve one finite-horizon MPC optimization problem."""
+    """Solve one finite-horizon MPC optimization problem with SciPy SLSQP."""
 
     if warm_start is None:
         u0 = np.repeat(problem.u_ref[time_index].reshape(1, -1), problem.horizon, axis=0)
@@ -225,18 +317,23 @@ def solve_open_loop(problem: LinearMPCProblem, x_start: np.ndarray, time_index: 
     if problem.du_min is not None or problem.du_max is not None:
         constraints.extend(_delta_u_constraints(problem, u_prev))
 
+    maxiter = int(problem.solver_options.get("maxiter", problem.solver_options.get("max_iter", 250)))
+    ftol = float(problem.solver_options.get("ftol", 1e-8))
+    disp = bool(problem.solver_options.get("disp", False))
+
     result = minimize(
         fun=lambda z: horizon_cost(problem, x_start, z, time_index, u_prev),
         x0=u0.reshape(-1),
         method="SLSQP",
         bounds=bounds,
         constraints=constraints,
-        options={"maxiter": 250, "ftol": 1e-8, "disp": False},
+        options={"maxiter": maxiter, "ftol": ftol, "disp": disp},
     )
 
     U = result.x.reshape(problem.horizon, problem.nu)
     X = rollout(problem, x_start, U, time_index)
     return {
+        "solver": "native_slsqp",
         "success": bool(result.success),
         "status": int(result.status),
         "message": str(result.message),
@@ -245,6 +342,128 @@ def solve_open_loop(problem: LinearMPCProblem, x_start: np.ndarray, time_index: 
         "X": X,
         "nit": int(getattr(result, "nit", -1)),
     }
+
+
+def solve_open_loop_casadi(problem: LinearMPCProblem, x_start: np.ndarray, time_index: int, u_prev: np.ndarray, warm_start: np.ndarray | None = None) -> dict[str, Any]:
+    """Solve one finite-horizon MPC optimization problem with CasADi Opti.
+
+    The formulation mirrors the native solver: same linear/LTV model, same
+    quadratic objective, same input/state/rate constraints. CasADi is imported
+    lazily so the native solver still works on machines without CasADi.
+    """
+
+    try:
+        import casadi as ca  # type: ignore
+    except Exception as exc:  # pragma: no cover - depends on local environment
+        raise InputError(
+            "CasADi backend requested, but the 'casadi' package is not importable. "
+            "Install casadi or switch solver.backend to 'native_slsqp'."
+        ) from exc
+
+    if warm_start is None:
+        u0 = np.repeat(problem.u_ref[time_index].reshape(1, -1), problem.horizon, axis=0)
+    else:
+        u0 = warm_start.reshape(problem.horizon, problem.nu).copy()
+    if problem.u_min is not None:
+        u0 = np.maximum(u0, problem.u_min.reshape(1, -1))
+    if problem.u_max is not None:
+        u0 = np.minimum(u0, problem.u_max.reshape(1, -1))
+
+    x0_pred = rollout(problem, x_start, u0, time_index)
+
+    opti = ca.Opti()
+    X = opti.variable(problem.nx, problem.horizon + 1)
+    U = opti.variable(problem.nu, problem.horizon)
+
+    def dm_vec(value: np.ndarray) -> Any:
+        return ca.DM(np.asarray(value, dtype=float).reshape(-1, 1))
+
+    def quad(expr: Any, weight: np.ndarray) -> Any:
+        W = ca.DM(weight)
+        return ca.mtimes([expr.T, W, expr])
+
+    opti.subject_to(X[:, 0] == dm_vec(x_start))
+    cost = 0
+    prev = dm_vec(u_prev)
+
+    for k in range(problem.horizon):
+        A, B = get_AB(problem, time_index + k)
+        d_k = dm_vec(problem.d[time_index + k])
+        opti.subject_to(X[:, k + 1] == ca.mtimes(ca.DM(A), X[:, k]) + ca.mtimes(ca.DM(B), U[:, k]) + d_k)
+
+        x_err = X[:, k] - dm_vec(problem.x_ref[time_index + k])
+        u_err = U[:, k] - dm_vec(problem.u_ref[time_index + k])
+        du = U[:, k] - prev
+        cost = cost + quad(x_err, problem.Q) + quad(u_err, problem.R) + quad(du, problem.Rd)
+        prev = U[:, k]
+
+        for j in range(problem.nu):
+            if problem.u_min is not None:
+                opti.subject_to(U[j, k] >= float(problem.u_min[j]))
+            if problem.u_max is not None:
+                opti.subject_to(U[j, k] <= float(problem.u_max[j]))
+            if problem.du_min is not None:
+                opti.subject_to(du[j] >= float(problem.du_min[j]))
+            if problem.du_max is not None:
+                opti.subject_to(du[j] <= float(problem.du_max[j]))
+
+        for i in range(problem.nx):
+            if problem.x_min is not None:
+                opti.subject_to(X[i, k + 1] >= float(problem.x_min[i]))
+            if problem.x_max is not None:
+                opti.subject_to(X[i, k + 1] <= float(problem.x_max[i]))
+
+    x_terminal = X[:, problem.horizon] - dm_vec(problem.x_ref[time_index + problem.horizon])
+    cost = cost + quad(x_terminal, problem.P)
+    opti.minimize(cost)
+
+    opti.set_initial(U, u0.T)
+    opti.set_initial(X, x0_pred.T)
+
+    print_level = int(problem.solver_options.get("print_level", problem.solver_options.get("ipopt_print_level", 0)))
+    max_iter = int(problem.solver_options.get("max_iter", problem.solver_options.get("maxiter", 200)))
+    tol = float(problem.solver_options.get("tol", 1e-8))
+    acceptable_tol = float(problem.solver_options.get("acceptable_tol", 1e-6))
+    expand = bool(problem.solver_options.get("expand", False))
+
+    p_opts = {"expand": expand, "print_time": bool(problem.solver_options.get("print_time", False))}
+    s_opts = {
+        "print_level": print_level,
+        "max_iter": max_iter,
+        "tol": tol,
+        "acceptable_tol": acceptable_tol,
+    }
+    opti.solver("ipopt", p_opts, s_opts)
+
+    try:
+        sol = opti.solve()
+        U_opt = _coerce_input_plan(problem, sol.value(U), name="casadi_U")
+        X_opt = _coerce_state_plan(problem, sol.value(X), name="casadi_X")
+        cost_value = float(sol.value(cost))
+        stats = sol.stats()
+        return {
+            "solver": "casadi_opti",
+            "success": bool(stats.get("success", True)),
+            "status": 0,
+            "message": str(stats.get("return_status", "Solve_Succeeded")),
+            "cost": cost_value,
+            "U": U_opt,
+            "X": X_opt,
+            "nit": int(stats.get("iter_count", -1)),
+        }
+    except Exception as exc:  # pragma: no cover - depends on local solver behavior
+        # Keep the closed-loop simulation alive. simulate_mpc will switch to the
+        # package fallback command because success is False.
+        return {
+            "solver": "casadi_opti",
+            "success": False,
+            "status": 1,
+            "message": f"CasADi solve failed: {exc.__class__.__name__}: {exc}",
+            "cost": float(horizon_cost(problem, x_start, u0.reshape(-1), time_index, u_prev)),
+            "U": u0,
+            "X": x0_pred,
+            "nit": -1,
+        }
 
 
 def _state_constraints(problem: LinearMPCProblem, x_start: np.ndarray, time_index: int) -> list[dict[str, Any]]:
@@ -294,6 +513,14 @@ def _delta_u_constraints(problem: LinearMPCProblem, u_prev: np.ndarray) -> list[
     return constraints
 
 
+def _select_open_loop_solver(problem: LinearMPCProblem):
+    if problem.solver_backend == "native_slsqp":
+        return solve_open_loop
+    if problem.solver_backend == "casadi_opti":
+        return solve_open_loop_casadi
+    raise InputError(f"Unsupported solver backend: {problem.solver_backend}")
+
+
 def simulate_mpc(problem: LinearMPCProblem) -> dict[str, Any]:
     """Run receding-horizon closed-loop MPC simulation."""
 
@@ -301,19 +528,22 @@ def simulate_mpc(problem: LinearMPCProblem) -> dict[str, Any]:
     U = np.zeros((problem.steps, problem.nu))
     costs = np.zeros(problem.steps)
     success = np.zeros(problem.steps, dtype=bool)
+    nit = np.zeros(problem.steps, dtype=int)
     messages: list[str] = []
     X[0] = problem.x0
 
     u_prev = np.zeros(problem.nu)
     warm: np.ndarray | None = None
+    open_loop_solver = _select_open_loop_solver(problem)
 
     for t in range(problem.steps):
-        sol = solve_open_loop(problem, X[t], t, u_prev, warm_start=warm)
+        sol = open_loop_solver(problem, X[t], t, u_prev, warm_start=warm)
         success[t] = bool(sol["success"])
         messages.append(sol["message"])
         costs[t] = float(sol["cost"])
+        nit[t] = int(sol.get("nit", -1))
 
-        planned_U = sol["U"]
+        planned_U = _coerce_input_plan(problem, sol["U"])
         if not sol["success"]:
             planned_U = _fallback_input(problem, t, u_prev)
 
@@ -329,6 +559,7 @@ def simulate_mpc(problem: LinearMPCProblem) -> dict[str, Any]:
 
     return {
         "analysis_type": "lti_ltv_mpc_simulation",
+        "solver_backend": problem.solver_backend,
         "dt": problem.dt,
         "steps": problem.steps,
         "horizon": problem.horizon,
@@ -343,13 +574,14 @@ def simulate_mpc(problem: LinearMPCProblem) -> dict[str, Any]:
         "costs": costs,
         "success": success,
         "messages": messages,
+        "solver_iterations": nit,
         "final_state": X[-1],
         "all_optimizations_successful": bool(np.all(success)),
     }
 
 
 def _fallback_input(problem: LinearMPCProblem, time_index: int, u_prev: np.ndarray) -> np.ndarray:
-    """Return a safe fallback input sequence if SLSQP fails."""
+    """Return a safe fallback input sequence if an optimizer fails."""
 
     U = np.repeat(u_prev.reshape(1, -1), problem.horizon, axis=0)
     if problem.u_min is not None:
