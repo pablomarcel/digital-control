@@ -9,10 +9,26 @@ from typing import Any
 
 try:
     from .app import MPCApp, MPCRunResult
-    from .core import LinearMPCProblem, parse_problem, run_spec, simulate_mpc, solve_open_loop
+    from .core import (
+        LinearMPCProblem,
+        parse_problem,
+        parse_solver_config,
+        run_spec,
+        simulate_mpc,
+        solve_open_loop,
+        solve_open_loop_casadi,
+    )
 except ImportError:  # pragma: no cover
     from app import MPCApp, MPCRunResult  # type: ignore
-    from core import LinearMPCProblem, parse_problem, run_spec, simulate_mpc, solve_open_loop  # type: ignore
+    from core import (  # type: ignore
+        LinearMPCProblem,
+        parse_problem,
+        parse_solver_config,
+        run_spec,
+        simulate_mpc,
+        solve_open_loop,
+        solve_open_loop_casadi,
+    )
 
 
 def run_mpc_file(input_path: str | Path, out_dir: str | Path | None = None, *, plots: bool = True, show: bool = False) -> MPCRunResult:
@@ -32,9 +48,11 @@ __all__ = [
     "MPCApp",
     "MPCRunResult",
     "parse_problem",
+    "parse_solver_config",
     "run_mpc_file",
     "run_mpc_spec",
     "run_spec",
     "simulate_mpc",
     "solve_open_loop",
+    "solve_open_loop_casadi",
 ]

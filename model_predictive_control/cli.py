@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 from pathlib import Path
 
-# Import shim so both commands work:
+# Import shim so these styles can work depending on where the runbook is used:
+#   python -m cli ...
 #   python -m model_predictive_control.cli ...
 #   python model_predictive_control/cli.py ...
 if __package__ in (None, ""):
@@ -19,11 +19,9 @@ if __package__ in (None, ""):
     if str(PARENT) not in sys.path:
         sys.path.insert(0, str(PARENT))
     from model_predictive_control.app import MPCApp  # type: ignore
-    from model_predictive_control.core import run_spec  # type: ignore
     from model_predictive_control.utils import optional_import, print_kv, resolve_project_paths  # type: ignore
 else:
     from .app import MPCApp
-    from .core import run_spec
     from .utils import optional_import, print_kv, resolve_project_paths
 
 
@@ -32,6 +30,7 @@ EXAMPLE_FILES = {
         "title": "Double integrator constrained MPC",
         "analysis_type": "lti_mpc_sim",
         "plant": "linear_state_space",
+        "solver": {"backend": "native_slsqp", "maxiter": 250, "ftol": 1e-8},
         "dt": 0.1,
         "model": {
             "A": [[1.0, 0.1], [0.0, 1.0]],
@@ -60,13 +59,91 @@ EXAMPLE_FILES = {
             "x_max": [10.0, 5.0]
         }
     },
+    "double_integrator_mpc_casadi.json": {
+        "title": "Double integrator constrained MPC - CasADi Opti backend",
+        "analysis_type": "lti_mpc_sim",
+        "plant": "linear_state_space",
+        "solver": {
+            "backend": "casadi_opti",
+            "max_iter": 150,
+            "tol": 1e-8,
+            "acceptable_tol": 1e-6,
+            "print_level": 0,
+            "print_time": False,
+            "expand": False
+        },
+        "dt": 0.1,
+        "model": {
+            "A": [[1.0, 0.1], [0.0, 1.0]],
+            "B": [[0.005], [0.1]],
+            "d": [0.0, 0.0]
+        },
+        "state_names": ["position", "velocity"],
+        "input_names": ["acceleration_command"],
+        "x0": [6.0, 0.0],
+        "x_ref": [0.0, 0.0],
+        "u_ref": [0.0],
+        "horizon": 14,
+        "steps": 45,
+        "weights": {
+            "Q": [8.0, 0.8],
+            "R": [0.04],
+            "P": [20.0, 3.0],
+            "Rd": [0.15]
+        },
+        "constraints": {
+            "u_min": [-2.0],
+            "u_max": [2.0],
+            "du_min": [-0.45],
+            "du_max": [0.45],
+            "x_min": [-10.0, -5.0],
+            "x_max": [10.0, 5.0]
+        }
+    },
     "automotive_engine_cooling_mpc.json": {
         "title": "Automotive engine cooling LTV MPC demo",
         "analysis_type": "ltv_mpc_sim",
         "plant": "thermal_cooling_4state_demo",
+        "solver": {"backend": "native_slsqp", "maxiter": 250, "ftol": 1e-8},
         "dt": 1.0,
         "horizon": 12,
         "steps": 90,
+        "ambient_temp_c": 38.0,
+        "x0": [118.0, 101.0, 110.0, 90.0],
+        "x_ref": [105.0, 92.0, 100.0, 82.0],
+        "state_names": ["wall_temp_c", "coolant_out_c", "block_temp_c", "radiator_out_c"],
+        "input_names": ["pump_command", "fan_command"],
+        "weights": {
+            "Q": [5.0, 8.0, 2.0, 1.0],
+            "R": [0.05, 0.08],
+            "P": [10.0, 14.0, 4.0, 2.0],
+            "Rd": [0.35, 0.45]
+        },
+        "constraints": {
+            "u_min": [0.0, 0.0],
+            "u_max": [1.0, 1.0],
+            "du_min": [-0.12, -0.12],
+            "du_max": [0.12, 0.12],
+            "x_min": [70.0, 60.0, 70.0, 50.0],
+            "x_max": [128.0, 112.0, 122.0, 108.0]
+        }
+    },
+    "automotive_engine_cooling_mpc_casadi.json": {
+        "title": "Automotive engine cooling LTV MPC demo - CasADi Opti backend",
+        "analysis_type": "ltv_mpc_sim",
+        "plant": "thermal_cooling_4state_demo",
+        "solver": {
+            "backend": "casadi_opti",
+            "max_iter": 150,
+            "tol": 1e-8,
+            "acceptable_tol": 1e-6,
+            "print_level": 0,
+            "print_time": False,
+            "expand": False
+        },
+        "dt": 1.0,
+        "horizon": 8,
+        "steps": 45,
         "ambient_temp_c": 38.0,
         "x0": [118.0, 101.0, 110.0, 90.0],
         "x_ref": [105.0, 92.0, 100.0, 82.0],
@@ -110,7 +187,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("list-examples", help="List example JSON files")
     sub.add_parser("check-libs", help="Check optional MPC-related package imports")
     sub.add_parser("tree", help="Print resolved package input and output folders")
-    sub.add_parser("self-test", help="Create examples and run the double-integrator demo")
+    sub.add_parser("self-test", help="Create examples and run the native double-integrator demo")
+    sub.add_parser("self-test-casadi", help="Create examples and run the CasADi double-integrator demo")
 
     return parser
 
@@ -170,6 +248,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     print("MPC run complete.")
     print_kv([
         ("title", result.get("title")),
+        ("plant", result.get("plant")),
+        ("solver_backend", result.get("solver_backend")),
         ("steps", result.get("steps")),
         ("horizon", result.get("horizon")),
         ("all_success", result.get("all_optimizations_successful")),
@@ -185,6 +265,13 @@ def cmd_self_test() -> int:
     cmd_init_examples(force=False)
     paths = resolve_project_paths()
     args = argparse.Namespace(input=str(paths.in_dir / "double_integrator_mpc.json"), out=None, stem="self_test_double_integrator", no_plots=False, show=False)
+    return cmd_run(args)
+
+
+def cmd_self_test_casadi() -> int:
+    cmd_init_examples(force=False)
+    paths = resolve_project_paths()
+    args = argparse.Namespace(input=str(paths.in_dir / "double_integrator_mpc_casadi.json"), out=None, stem="self_test_double_integrator_casadi", no_plots=False, show=False)
     return cmd_run(args)
 
 
@@ -207,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_run(args)
     if args.command == "self-test":
         return cmd_self_test()
+    if args.command == "self-test-casadi":
+        return cmd_self_test_casadi()
 
     parser.error(f"Unknown command: {args.command}")
     return 2

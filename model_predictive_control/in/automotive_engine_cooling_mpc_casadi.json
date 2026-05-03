@@ -1,15 +1,19 @@
 {
-  "title": "Automotive engine cooling LTV MPC demo",
+  "title": "Automotive engine cooling LTV MPC demo - CasADi Opti backend",
   "analysis_type": "ltv_mpc_sim",
   "plant": "thermal_cooling_4state_demo",
   "solver": {
-    "backend": "native_slsqp",
-    "maxiter": 250,
-    "ftol": 1e-08
+    "backend": "casadi_opti",
+    "max_iter": 150,
+    "tol": 1e-08,
+    "acceptable_tol": 1e-06,
+    "print_level": 0,
+    "print_time": false,
+    "expand": false
   },
   "dt": 1.0,
-  "horizon": 12,
-  "steps": 90,
+  "horizon": 8,
+  "steps": 45,
   "ambient_temp_c": 38.0,
   "x0": [
     118.0,

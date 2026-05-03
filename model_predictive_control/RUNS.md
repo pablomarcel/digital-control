@@ -23,43 +23,77 @@ python -m cli init-examples
 Overwrite examples if needed:
 
 ```bash
-python -m cli init-examples --force
+python -m cli init-examples \
+  --force
 ```
 
-## Run the constrained double-integrator MPC demo
+## List example input files
 
 ```bash
-python -m cli run model_predictive_control/in/double_integrator_mpc.json
+python -m cli list-examples
 ```
 
-Equivalent short form when running from inside the package folder:
+## Native SciPy/SLSQP route: double integrator
 
 ```bash
-python cli.py run in/double_integrator_mpc.json
+python -m cli run in/double_integrator_mpc.json
 ```
 
-## Run the automotive engine-cooling LTV MPC demo
+## Native SciPy/SLSQP route: automotive engine cooling demo
 
 ```bash
-python -m cli run model_predictive_control/in/automotive_engine_cooling_mpc.json
+python -m cli run in/automotive_engine_cooling_mpc.json
 ```
 
-Equivalent short form when running from inside the package folder:
+## CasADi Opti/IPOPT route: double integrator
 
 ```bash
-python cli.py run in/automotive_engine_cooling_mpc.json
+python -m cli run in/double_integrator_mpc_casadi.json
+```
+
+## CasADi Opti/IPOPT route: automotive engine cooling demo
+
+```bash
+python -m cli run in/automotive_engine_cooling_mpc_casadi.json
+```
+
+## Send outputs to the package out folder with an explicit stem
+
+```bash
+python -m cli run in/double_integrator_mpc_casadi.json \
+  --out out \
+  --stem double_integrator_casadi
+```
+
+```bash
+python -m cli run in/automotive_engine_cooling_mpc_casadi.json \
+  --out out \
+  --stem cooling_casadi
+```
+
+## Run without plots
+
+```bash
+python -m cli run in/double_integrator_mpc_casadi.json \
+  --no-plots
 ```
 
 ## Send outputs to a custom folder
 
 ```bash
-python -m cli run model_predictive_control/in/automotive_engine_cooling_mpc.json \
-  --out model_predictive_control/out \
+python -m cli run in/automotive_engine_cooling_mpc.json \
+  --out out/mpc/out \
   --stem cooling_demo
 ```
 
-## Run a quick package self-test
+## Self-test the native route
 
 ```bash
 python -m cli self-test
+```
+
+## Self-test the CasADi route
+
+```bash
+python -m cli self-test-casadi
 ```
