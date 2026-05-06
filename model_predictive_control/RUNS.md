@@ -97,3 +97,10 @@ python -m cli self-test
 ```bash
 python -m cli self-test-casadi
 ```
+
+##
+
+```bash
+python sandbox/plot_discrete_time.py \
+  out/discrete_time_system/double_integrator_step.csv
+```
