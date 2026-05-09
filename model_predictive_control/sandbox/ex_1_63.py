@@ -5,21 +5,36 @@ Exercise 1.63 - System identification of the nonlinear CSTR.
 
 Rawlings, Mayne, Diehl, Model Predictive Control, Chapter 1.
 
-This script replaces the MATLAB idinput/iddata/ssest workflow with a
-self-contained Python sandbox:
+This upgraded sandbox is intentionally diagnostic.  The previous version used
+ordinary least squares directly on noisy measured outputs as if they were exact
+states.  That is a classic errors-in-variables mistake: measurement noise appears
+on both sides of x(k+1) = A x(k) + B u(k), so the fitted A matrix becomes biased,
+especially when the PRBS amplitudes are intentionally small to keep the nonlinear
+CSTR near the nominal operating point.
 
-1. Generate two uncorrelated PRBS input sequences around the nominal CSTR
-   operating point.
-2. Simulate the nonlinear CSTR from Example 1.11.
-3. Add measurement noise to create a realistic identification dataset.
-4. Identify a third-order, two-input, three-output discrete state-space model.
-   Because all three states are measured in Example 1.11, the identified
-   model uses the measured deviation states directly and estimates A and B by
-   one-step weighted least squares.
-5. Compare step responses of the identified model, the textbook linear model,
-   and the nonlinear plant.
-6. Use the identified model in an offset-free unconstrained MPC simulation with
-   three integrating disturbances and the nonlinear CSTR as the plant.
+The script now writes and compares several models:
+
+1. raw_noisy_ls
+   The old measured-state least-squares workflow.  It is retained as a warning.
+
+2. clean_replay_ls
+   The same workflow applied to the clean simulated states.  This is not what one
+   has in a real experiment, but it exposes how much of the failure came from
+   measurement noise rather than the nonlinear plant.
+
+3. local_finite_difference
+   A local discrete-time perturbation model obtained by perturbing the nonlinear
+   simulator around the nominal steady state and integrating one sample.
+
+4. regularized_noise_aware
+   The selected model.  It fits the noisy PRBS dataset, but regularizes toward the
+   local perturbation model and enforces the physically known level integrator.
+   This is a practical grey-box identification compromise for this sandbox.
+
+The selected model is then used in an offset-free linear MPC simulation with the
+nonlinear CSTR as the plant.  The closed-loop test applies a +10% inlet-flow
+step at 10 minutes.  The controller targets concentration and level, matching the
+spirit of the offset-free CSTR examples in Section 1.5.
 
 Outputs are written to out/ex_1_63 by default.
 """
@@ -32,12 +47,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
+import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
-from scipy.linalg import solve_discrete_are
-
-import matplotlib.pyplot as plt
-
+from scipy.linalg import LinAlgError, solve_discrete_are
 
 Array = NDArray[np.float64]
 
@@ -56,7 +69,6 @@ class CSTRParams:
     dH: float = -5.0e4       # kJ/kmol
 
 
-# Nominal steady state and textbook discrete linear model from Example 1.11.
 XS = np.array([0.878, 324.5, 0.659], dtype=float)  # [c, T, h]
 US = np.array([300.0, 0.1], dtype=float)           # [Tc, F]
 
@@ -79,13 +91,20 @@ B_TEXTBOOK = np.array(
 BP_TEXTBOOK = np.array([-0.1175, 69.74, 6.637], dtype=float)
 C_TEXTBOOK = np.eye(3, dtype=float)
 
-STATE_NAMES = ["c_minus_cs_kmol_m3", "T_minus_Ts_K", "h_minus_hs_m"]
-INPUT_NAMES = ["Tc_minus_Tcs_K", "F_minus_Fs_m3_min"]
-OUTPUT_ABS_NAMES = ["c_kmol_m3", "T_K", "h_m"]
-INPUT_ABS_NAMES = ["Tc_K", "F_m3_min"]
+STATE_NAMES = ["c-cs [kmol/m3]", "T-Ts [K]", "h-hs [m]"]
+INPUT_NAMES = ["Tc-Tcs [K]", "F-Fs [m3/min]"]
+ABS_STATE_NAMES = ["c [kmol/m3]", "T [K]", "h [m]"]
+ABS_INPUT_NAMES = ["Tc [K]", "F [m3/min]"]
 
 
-def cstr_rhs(x_abs: Array, u_abs: Array, params: CSTRParams, F0: float | None = None, U: float | None = None) -> Array:
+def cstr_rhs(
+    x_abs: Array,
+    u_abs: Array,
+    params: CSTRParams,
+    *,
+    F0: float | None = None,
+    U: float | None = None,
+) -> Array:
     """Continuous-time nonlinear CSTR right-hand side in absolute variables."""
 
     c, T, h = np.asarray(x_abs, dtype=float)
@@ -95,7 +114,8 @@ def cstr_rhs(x_abs: Array, u_abs: Array, params: CSTRParams, F0: float | None = 
 
     area = np.pi * params.r**2
     h_safe = max(float(h), 1.0e-4)
-    k = params.k0 * np.exp(-params.EoverR / max(float(T), 1.0))
+    T_safe = max(float(T), 1.0)
+    k = params.k0 * np.exp(-params.EoverR / T_safe)
 
     dc = F0_eff * (params.c0 - c) / (area * h_safe) - k * c
     dT = (
@@ -107,7 +127,16 @@ def cstr_rhs(x_abs: Array, u_abs: Array, params: CSTRParams, F0: float | None = 
     return np.array([dc, dT, dh], dtype=float)
 
 
-def rk4_step(x_abs: Array, u_abs: Array, dt: float, params: CSTRParams, *, F0: float | None = None, U: float | None = None, substeps: int = 20) -> Array:
+def rk4_step(
+    x_abs: Array,
+    u_abs: Array,
+    dt: float,
+    params: CSTRParams,
+    *,
+    F0: float | None = None,
+    U: float | None = None,
+    substeps: int = 20,
+) -> Array:
     """Integrate the nonlinear CSTR for one sample using fixed-step RK4."""
 
     h = dt / int(substeps)
@@ -119,48 +148,61 @@ def rk4_step(x_abs: Array, u_abs: Array, dt: float, params: CSTRParams, *, F0: f
         k4 = cstr_rhs(x + h * k3, u_abs, params, F0=F0, U=U)
         x = x + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
         x[2] = max(x[2], 1.0e-4)
+        if not np.all(np.isfinite(x)):
+            raise FloatingPointError("CSTR integration diverged; reduce excitation amplitudes.")
     return x
 
 
-def generate_prbs(n_samples: int, amp: float, rng: np.random.Generator, min_block: int = 3, max_block: int = 12) -> Array:
-    """Generate a simple PRBS-like binary signal with random block lengths."""
+def generate_prbs(
+    n_samples: int,
+    amp: float,
+    rng: np.random.Generator,
+    *,
+    min_block: int = 1,
+    max_block: int = 5,
+    switch_probability: float = 0.65,
+) -> Array:
+    """Generate a PRBS-like two-level sequence with random block lengths."""
 
     values: list[float] = []
     current = amp if rng.random() > 0.5 else -amp
     while len(values) < n_samples:
-        if rng.random() < 0.65:
+        if rng.random() < switch_probability:
             current = -current
         block = int(rng.integers(min_block, max_block + 1))
         values.extend([current] * block)
     return np.asarray(values[:n_samples], dtype=float)
 
 
-def make_identification_data(n_samples: int, dt: float, rng: np.random.Generator, params: CSTRParams) -> dict[str, Array]:
-    """Generate PRBS inputs and noisy nonlinear CSTR outputs."""
+def make_identification_data(
+    n_samples: int,
+    dt: float,
+    rng: np.random.Generator,
+    params: CSTRParams,
+    *,
+    tc_amp: float = 0.20,
+    f_amp: float = 0.00020,
+    noise_scale: float = 1.0,
+) -> dict[str, Array]:
+    """Generate PRBS inputs plus clean and noisy nonlinear CSTR outputs."""
 
-    # Conservative local perturbations to avoid ignition/nonlinear branch changes.
     u_dev = np.column_stack(
         [
-            generate_prbs(n_samples, amp=0.2, rng=rng, min_block=1, max_block=5),       # coolant temperature, K
-            generate_prbs(n_samples, amp=0.0002, rng=rng, min_block=1, max_block=5),    # outlet flowrate, m^3/min
+            generate_prbs(n_samples, tc_amp, rng, min_block=1, max_block=5),
+            generate_prbs(n_samples, f_amp, rng, min_block=1, max_block=5),
         ]
     )
 
     x_abs = np.zeros((n_samples + 1, 3), dtype=float)
     y_dev_clean = np.zeros((n_samples + 1, 3), dtype=float)
     x_abs[0] = XS.copy()
-    y_dev_clean[0] = x_abs[0] - XS
 
     for k in range(n_samples):
-        u_abs = US + u_dev[k]
-        x_abs[k + 1] = rk4_step(x_abs[k], u_abs, dt, params, substeps=20)
+        x_abs[k + 1] = rk4_step(x_abs[k], US + u_dev[k], dt, params, substeps=20)
         y_dev_clean[k + 1] = x_abs[k + 1] - XS
 
-    # Measurement noise. These are intentionally small enough for local ID but visible.
-    noise_std = np.array([4.0e-4, 4.0e-2, 4.0e-4], dtype=float)
-    noise = rng.normal(0.0, noise_std, size=y_dev_clean.shape)
-    y_dev_noisy = y_dev_clean + noise
-    y_dev_noisy[0] = y_dev_clean[0] + rng.normal(0.0, noise_std)
+    noise_std = noise_scale * np.array([4.0e-4, 4.0e-2, 4.0e-4], dtype=float)
+    y_dev_noisy = y_dev_clean + rng.normal(0.0, noise_std, size=y_dev_clean.shape)
 
     return {
         "u_dev": u_dev,
@@ -169,26 +211,88 @@ def make_identification_data(n_samples: int, dt: float, rng: np.random.Generator
         "y_dev_noisy": y_dev_noisy,
         "noise_std": noise_std,
         "time": np.arange(n_samples + 1, dtype=float) * dt,
+        "tc_amp": np.array([tc_amp]),
+        "f_amp": np.array([f_amp]),
     }
 
 
-def identify_measured_state_model(y_dev: Array, u_dev: Array, ridge: float = 1.0e-8) -> tuple[Array, Array]:
-    """Identify x+ = A x + B u using measured outputs as states.
+def identify_measured_state_ls(y_dev: Array, u_dev: Array, *, ridge: float = 1.0e-9) -> tuple[Array, Array]:
+    """Fit x(k+1) = A x(k) + B u(k) by ridge-regularized least squares."""
 
-    This is a Python replacement for a simple third-order ssest workflow. Since
-    Example 1.11 measures all three states, the measured outputs are legitimate
-    state coordinates for this sandbox.
-    """
-
-    xk = y_dev[:-1]
-    xkp1 = y_dev[1:]
-    uk = u_dev
-    phi = np.hstack([xk, uk])  # n_samples x 5
+    xk = np.asarray(y_dev[:-1], dtype=float)
+    xkp1 = np.asarray(y_dev[1:], dtype=float)
+    uk = np.asarray(u_dev, dtype=float)
+    phi = np.hstack([xk, uk])
     gram = phi.T @ phi + ridge * np.eye(phi.shape[1])
-    theta = np.linalg.solve(gram, phi.T @ xkp1)  # 5 x 3, predicts rows
-    A_id = theta[:3, :].T
-    B_id = theta[3:, :].T
-    return A_id, B_id
+    theta = np.linalg.solve(gram, phi.T @ xkp1)
+    return theta[:3, :].T, theta[3:, :].T
+
+
+def local_finite_difference_model(dt: float, params: CSTRParams, *, eps_x: Array | None = None, eps_u: Array | None = None) -> tuple[Array, Array]:
+    """Compute a local discrete model by central differences of one-sample flow map."""
+
+    eps_x = np.array([1.0e-4, 1.0e-2, 1.0e-4], dtype=float) if eps_x is None else np.asarray(eps_x, dtype=float)
+    eps_u = np.array([1.0e-2, 1.0e-5], dtype=float) if eps_u is None else np.asarray(eps_u, dtype=float)
+
+    A = np.zeros((3, 3), dtype=float)
+    B = np.zeros((3, 2), dtype=float)
+    for i in range(3):
+        dx = np.zeros(3, dtype=float)
+        dx[i] = eps_x[i]
+        xp = rk4_step(XS + dx, US, dt, params, substeps=30) - XS
+        xm = rk4_step(XS - dx, US, dt, params, substeps=30) - XS
+        A[:, i] = (xp - xm) / (2.0 * eps_x[i])
+    for j in range(2):
+        du = np.zeros(2, dtype=float)
+        du[j] = eps_u[j]
+        xp = rk4_step(XS, US + du, dt, params, substeps=30) - XS
+        xm = rk4_step(XS, US - du, dt, params, substeps=30) - XS
+        B[:, j] = (xp - xm) / (2.0 * eps_u[j])
+    return project_level_integrator(A, B, dt, params)
+
+
+def project_level_integrator(A: Array, B: Array, dt: float, params: CSTRParams) -> tuple[Array, Array]:
+    """Enforce the exact level relation h+ = h - dt/area * F_dev at nominal F0."""
+
+    Ap = np.asarray(A, dtype=float).copy()
+    Bp = np.asarray(B, dtype=float).copy()
+    area = np.pi * params.r**2
+    Ap[2, :] = np.array([0.0, 0.0, 1.0])
+    Bp[2, :] = np.array([0.0, -dt / area])
+    return Ap, Bp
+
+
+def identify_regularized_noise_aware(
+    y_dev_noisy: Array,
+    u_dev: Array,
+    A_prior: Array,
+    B_prior: Array,
+    dt: float,
+    params: CSTRParams,
+    *,
+    noise_std: Array,
+    prior_strength: float = 2.5e-2,
+) -> tuple[Array, Array]:
+    """Fit noisy PRBS data while regularizing toward a local perturbation model."""
+
+    xk = np.asarray(y_dev_noisy[:-1], dtype=float)
+    xkp1 = np.asarray(y_dev_noisy[1:], dtype=float)
+    uk = np.asarray(u_dev, dtype=float)
+    phi = np.hstack([xk, uk])
+
+    theta_prior = np.vstack([A_prior.T, B_prior.T])
+    theta = np.zeros((5, 3), dtype=float)
+
+    # Output-wise weighting keeps temperature units from numerically dominating.
+    for j in range(3):
+        w = 1.0 / max(float(noise_std[j]), 1.0e-12)
+        gram = (w * phi).T @ (w * phi) + prior_strength * np.eye(5)
+        rhs = (w * phi).T @ (w * xkp1[:, j]) + prior_strength * theta_prior[:, j]
+        theta[:, j] = np.linalg.solve(gram, rhs)
+
+    A = theta[:3, :].T
+    B = theta[3:, :].T
+    return project_level_integrator(A, B, dt, params)
 
 
 def simulate_discrete_model(A: Array, B: Array, u_dev: Array, x0_dev: Array | None = None) -> Array:
@@ -197,70 +301,36 @@ def simulate_discrete_model(A: Array, B: Array, u_dev: Array, x0_dev: Array | No
     n = u_dev.shape[0]
     x = np.zeros((n + 1, A.shape[0]), dtype=float)
     if x0_dev is not None:
-        x[0] = x0_dev
+        x[0] = np.asarray(x0_dev, dtype=float)
     for k in range(n):
         x[k + 1] = A @ x[k] + B @ u_dev[k]
     return x
 
 
-def step_test_models(A_id: Array, B_id: Array, dt: float, params: CSTRParams) -> dict[str, Array]:
-    """Step-test nonlinear plant, textbook model, and identified model."""
+def step_test_models(models: dict[str, tuple[Array, Array]], dt: float, params: CSTRParams) -> dict[str, Array]:
+    """Step-test nonlinear plant, textbook model, and identified models."""
 
-    n_steps = 40
-    cases = [
-        ("Tc +1 K", np.array([1.0, 0.0], dtype=float)),
-        ("F +0.0002 m3/min", np.array([0.0, 0.0002], dtype=float)),
-    ]
+    n_steps = 45
+    cases = {
+        "Tc +1 K": np.array([1.0, 0.0], dtype=float),
+        "F +0.0002 m3/min": np.array([0.0, 0.0002], dtype=float),
+    }
     out: dict[str, Array] = {"time": np.arange(n_steps + 1, dtype=float) * dt}
 
-    for label, step in cases:
+    for label, step in cases.items():
         u = np.repeat(step.reshape(1, 2), n_steps, axis=0)
         nonlinear = np.zeros((n_steps + 1, 3), dtype=float)
         x_abs = XS.copy()
-        nonlinear[0] = x_abs - XS
         for k in range(n_steps):
-            x_abs = rk4_step(x_abs, US + step, dt, params, substeps=20)
+            x_abs = rk4_step(x_abs, US + step, dt, params, substeps=30)
             nonlinear[k + 1] = x_abs - XS
         out[f"{label} nonlinear"] = nonlinear
-        out[f"{label} textbook"] = simulate_discrete_model(A_TEXTBOOK, B_TEXTBOOK, u)
-        out[f"{label} identified"] = simulate_discrete_model(A_id, B_id, u)
-
+        for name, (A, B) in models.items():
+            out[f"{label} {name}"] = simulate_discrete_model(A, B, u)
     return out
 
 
-def prediction_matrices(A: Array, B: Array, horizon: int) -> tuple[Array, Array]:
-    """Build stacked prediction matrices for x_i, i=1..N."""
-
-    nx, nu = B.shape
-    sx = np.zeros((horizon * nx, nx), dtype=float)
-    su = np.zeros((horizon * nx, horizon * nu), dtype=float)
-    powers = [np.eye(nx)]
-    for i in range(1, horizon + 1):
-        powers.append(powers[-1] @ A)
-    for i in range(1, horizon + 1):
-        sx[(i - 1) * nx : i * nx, :] = powers[i]
-        for j in range(i):
-            su[(i - 1) * nx : i * nx, j * nu : (j + 1) * nu] = powers[i - 1 - j] @ B
-    return sx, su
-
-
-def unconstrained_mpc_first_move(A: Array, B: Array, e0: Array, horizon: int, Q: Array, R: Array, P: Array) -> Array:
-    """Solve unconstrained finite-horizon regulation and return first input move."""
-
-    nx, nu = B.shape
-    sx, su = prediction_matrices(A, B, horizon)
-    q_blocks = [Q for _ in range(horizon - 1)] + [P]
-    qbar = block_diag(q_blocks)
-    rbar = block_diag([R for _ in range(horizon)])
-    hess = su.T @ qbar @ su + rbar
-    grad = su.T @ qbar @ (sx @ e0)
-    u_stack = -np.linalg.solve(hess + 1.0e-10 * np.eye(hess.shape[0]), grad)
-    return u_stack[:nu]
-
-
 def block_diag(blocks: Iterable[Array]) -> Array:
-    """Small local block diagonal helper to avoid depending on scipy for this."""
-
     blocks = list(blocks)
     rows = sum(b.shape[0] for b in blocks)
     cols = sum(b.shape[1] for b in blocks)
@@ -268,39 +338,69 @@ def block_diag(blocks: Iterable[Array]) -> Array:
     r = c = 0
     for b in blocks:
         rr, cc = b.shape
-        out[r : r + rr, c : c + cc] = b
+        out[r:r + rr, c:c + cc] = b
         r += rr
         c += cc
     return out
 
 
-def steady_target(A: Array, B: Array, Bd: Array, C: Array, Cd: Array, d_hat: Array, controlled_indices: list[int], r_sp: Array, u_sp: Array) -> tuple[Array, Array, Array]:
-    """Compute least-norm steady target for given disturbance estimate."""
+def prediction_matrices(A: Array, B: Array, horizon: int) -> tuple[Array, Array]:
+    nx, nu = B.shape
+    sx = np.zeros((horizon * nx, nx), dtype=float)
+    su = np.zeros((horizon * nx, horizon * nu), dtype=float)
+    powers = [np.eye(nx)]
+    for i in range(1, horizon + 1):
+        powers.append(powers[-1] @ A)
+    for i in range(1, horizon + 1):
+        sx[(i - 1) * nx:i * nx] = powers[i]
+        for j in range(i):
+            su[(i - 1) * nx:i * nx, j * nu:(j + 1) * nu] = powers[i - 1 - j] @ B
+    return sx, su
+
+
+def unconstrained_mpc_first_move(A: Array, B: Array, e0: Array, horizon: int, Q: Array, R: Array, P: Array) -> Array:
+    """Solve unconstrained finite-horizon regulation about the current target."""
+
+    nx, nu = B.shape
+    sx, su = prediction_matrices(A, B, horizon)
+    qbar = block_diag([Q for _ in range(horizon - 1)] + [P])
+    rbar = block_diag([R for _ in range(horizon)])
+    hess = su.T @ qbar @ su + rbar
+    grad = su.T @ qbar @ (sx @ e0)
+    u_stack = -np.linalg.solve(hess + 1.0e-10 * np.eye(hess.shape[0]), grad)
+    return u_stack[:nu]
+
+
+def steady_target(
+    A: Array,
+    B: Array,
+    Bd: Array,
+    C: Array,
+    Cd: Array,
+    d_hat: Array,
+    controlled_indices: list[int],
+    r_sp: Array,
+    u_sp: Array,
+) -> tuple[Array, Array, Array, float]:
+    """Compute a steady target, prioritizing exact c/h target equations."""
 
     nx, nu = B.shape
     H = np.zeros((len(controlled_indices), C.shape[0]), dtype=float)
     for row, idx in enumerate(controlled_indices):
         H[row, idx] = 1.0
 
-    # Equations:
-    # (I-A)x - B u = Bd d
-    # H(Cx + Cd d) = r_sp
     M = np.block([[np.eye(nx) - A, -B], [H @ C, np.zeros((len(controlled_indices), nu))]])
     rhs = np.concatenate([Bd @ d_hat, r_sp - H @ Cd @ d_hat])
 
-    # Minimize ||u-u_sp||^2 subject to M [x;u] = rhs.
-    # Since there are generally more equations than inputs, compute a feasible
-    # least-squares solution and then use the nullspace to minimize u deviation.
     z0 = np.linalg.lstsq(M, rhs, rcond=None)[0]
-    # Nullspace basis from SVD.
+    residual = float(np.linalg.norm(M @ z0 - rhs))
+
     _, s, vt = np.linalg.svd(M)
     rank = int(np.sum(s > 1.0e-9))
     Z = vt[rank:].T
     if Z.size:
         Eu = np.hstack([np.zeros((nu, nx)), np.eye(nu)])
-        lhs = Eu @ Z
-        rhs2 = u_sp - Eu @ z0
-        alpha = np.linalg.lstsq(lhs, rhs2, rcond=None)[0]
+        alpha = np.linalg.lstsq(Eu @ Z, u_sp - Eu @ z0, rcond=None)[0]
         z = z0 + Z @ alpha
     else:
         z = z0
@@ -308,49 +408,61 @@ def steady_target(A: Array, B: Array, Bd: Array, C: Array, Cd: Array, d_hat: Arr
     x_s = z[:nx]
     u_s = z[nx:]
     y_s = C @ x_s + Cd @ d_hat
-    return x_s, u_s, y_s
+    return x_s, u_s, y_s, residual
 
 
 def kalman_update(xhat: Array, P: Array, y: Array, C: Array, R: Array) -> tuple[Array, Array, Array]:
-    """Measurement update for a linear Gaussian estimator."""
-
     S = C @ P @ C.T + R
     K = P @ C.T @ np.linalg.pinv(S)
     innovation = y - C @ xhat
+    I = np.eye(P.shape[0])
     xhat_new = xhat + K @ innovation
-    P_new = (np.eye(P.shape[0]) - K @ C) @ P @ (np.eye(P.shape[0]) - K @ C).T + K @ R @ K.T
+    P_new = (I - K @ C) @ P @ (I - K @ C).T + K @ R @ K.T
     return xhat_new, P_new, innovation
 
 
-def simulate_offset_free_mpc_with_identified_model(A_id: Array, B_id: Array, dt: float, params: CSTRParams, rng: np.random.Generator) -> dict[str, Array]:
-    """Closed-loop nonlinear CSTR simulation using identified linear model in MPC."""
+def terminal_penalty(A: Array, B: Array, Q: Array, R: Array) -> Array:
+    try:
+        return solve_discrete_are(A, B, Q + 1.0e-9 * np.eye(Q.shape[0]), R)
+    except LinAlgError:
+        return 10.0 * Q + np.eye(Q.shape[0])
+
+
+def simulate_offset_free_mpc(
+    A: Array,
+    B: Array,
+    dt: float,
+    params: CSTRParams,
+    *,
+    n_steps: int = 100,
+    disturbance_time: float = 10.0,
+    inlet_flow_multiplier: float = 1.10,
+) -> dict[str, Array]:
+    """Closed-loop nonlinear CSTR simulation using an identified model in MPC."""
 
     nx, nu, nd, ny = 3, 2, 3, 3
     C = np.eye(3)
 
-    # Example 1.11(c)-style disturbance model: output disturbances on c and h,
-    # plus an input disturbance in the F channel.
+    # Disturbance model: output disturbance on c, output disturbance on h,
+    # and an input-equivalent disturbance through the outlet-flow channel.
     Cd = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float)
-    Bd = np.column_stack([np.zeros(nx), np.zeros(nx), B_id[:, 1]])
-
-    Ae = np.block([[A_id, Bd], [np.zeros((nd, nx)), np.eye(nd)]])
-    Be = np.vstack([B_id, np.zeros((nd, nu))])
+    Bd = np.column_stack([np.zeros(nx), np.zeros(nx), B[:, 1]])
+    Ae = np.block([[A, Bd], [np.zeros((nd, nx)), np.eye(nd)]])
+    Be = np.vstack([B, np.zeros((nd, nu))])
     Ce = np.hstack([C, Cd])
 
-    # Estimator tuning. Small measurement noise and disturbance covariance.
-    Qe = np.diag([1.0e-10, 1.0e-8, 1.0e-10, 1.0e-6, 1.0e-6, 5.0e-5])
+    # Bias the estimator to explain the inlet-flow step primarily through the
+    # input-equivalent disturbance d3, not through the h sensor-bias disturbance.
+    Qe = np.diag([1.0e-10, 1.0e-8, 1.0e-10, 1.0e-8, 1.0e-10, 1.0e-4])
     Re = np.diag([1.0e-8, 1.0e-6, 1.0e-8])
-    P = np.diag([1.0e-4, 1.0e-1, 1.0e-4, 1.0, 1.0, 1.0])
+    Pcov = np.diag([1.0e-4, 1.0e-1, 1.0e-4, 1.0, 1.0e-2, 1.0])
     xhat_e = np.zeros(nx + nd, dtype=float)
 
-    # MPC weights. Control c and h most strongly; T is left as measured but not targeted.
-    Qy = np.diag([8.0, 0.05, 8.0])
-    Qx = C.T @ Qy @ C
+    Qx = np.diag([8.0, 0.05, 8.0])
     R = np.diag([0.08, 0.08])
-    Pterm = solve_discrete_are(A_id, B_id, Qx + 1.0e-9 * np.eye(nx), R)
-    horizon = 12
+    Pterm = terminal_penalty(A, B, Qx, R)
+    horizon = 14
 
-    n_steps = 50
     x_abs = np.zeros((n_steps + 1, nx), dtype=float)
     y_abs = np.zeros((n_steps + 1, ny), dtype=float)
     y_dev = np.zeros((n_steps + 1, ny), dtype=float)
@@ -360,50 +472,49 @@ def simulate_offset_free_mpc_with_identified_model(A_id: Array, B_id: Array, dt:
     u_abs = np.zeros((n_steps, nu), dtype=float)
     target_x = np.zeros((n_steps, nx), dtype=float)
     target_u = np.zeros((n_steps, nu), dtype=float)
+    target_residual = np.zeros(n_steps, dtype=float)
     innovation = np.zeros((n_steps + 1, ny), dtype=float)
 
     x_abs[0] = XS.copy()
     y_abs[0] = x_abs[0]
     y_dev[0] = y_abs[0] - XS
-    r_sp = np.array([0.0, 0.0], dtype=float)  # c and h deviation targets
     controlled = [0, 2]
+    r_sp = np.array([0.0, 0.0], dtype=float)
 
     for k in range(n_steps):
-        # Measurement update at current sample. For this exercise use essentially
-        # noise-free measurement in the closed-loop test.
         meas = x_abs[k] - XS
-        xhat_e, P, innov = kalman_update(xhat_e, P, meas, Ce, Re)
-        innovation[k] = innov
+        xhat_e, Pcov, innov = kalman_update(xhat_e, Pcov, meas, Ce, Re)
         xhat[k] = xhat_e[:nx]
         dhat[k] = xhat_e[nx:]
+        innovation[k] = innov
 
-        xs_dev, us_dev, _ys_dev = steady_target(A_id, B_id, Bd, C, Cd, dhat[k], controlled, r_sp, np.zeros(nu))
+        xs_dev, us_dev, _ys_dev, res = steady_target(A, B, Bd, C, Cd, dhat[k], controlled, r_sp, np.zeros(nu))
         target_x[k] = xs_dev
         target_u[k] = us_dev
+        target_residual[k] = res
 
-        e0 = xhat[k] - xs_dev
-        du = unconstrained_mpc_first_move(A_id, B_id, e0, horizon, Qx, R, Pterm)
+        du = unconstrained_mpc_first_move(A, B, xhat[k] - xs_dev, horizon, Qx, R, Pterm)
         u_dev[k] = us_dev + du
 
-        # Conservative actuator clipping for nonlinear plant sanity.
+        # Keep the nonlinear plant in a sensible local operating region.
         u_dev[k, 0] = float(np.clip(u_dev[k, 0], -15.0, 15.0))
         u_dev[k, 1] = float(np.clip(u_dev[k, 1], -0.04, 0.04))
         u_abs[k] = US + u_dev[k]
 
-        F0_plant = params.F0 * (1.10 if (k * dt) >= 10.0 else 1.0)
-        x_abs[k + 1] = rk4_step(x_abs[k], u_abs[k], dt, params, F0=F0_plant, substeps=20)
+        F0_plant = params.F0 * (inlet_flow_multiplier if (k * dt) >= disturbance_time else 1.0)
+        x_abs[k + 1] = rk4_step(x_abs[k], u_abs[k], dt, params, F0=F0_plant, substeps=30)
         y_abs[k + 1] = x_abs[k + 1]
         y_dev[k + 1] = y_abs[k + 1] - XS
 
-        # Time update for the estimator.
         xhat_e = Ae @ xhat_e + Be @ u_dev[k]
-        P = Ae @ P @ Ae.T + Qe
+        Pcov = Ae @ Pcov @ Ae.T + Qe
 
-    # Final measurement update for stored final estimates.
-    xhat_e, P, innov = kalman_update(xhat_e, P, y_dev[-1], Ce, Re)
+    xhat_e, Pcov, innov = kalman_update(xhat_e, Pcov, y_dev[-1], Ce, Re)
     xhat[-1] = xhat_e[:nx]
     dhat[-1] = xhat_e[nx:]
     innovation[-1] = innov
+
+    rank_mat = np.block([[np.eye(nx) - A, Bd], [C, Cd]])
 
     return {
         "time": np.arange(n_steps + 1, dtype=float) * dt,
@@ -417,9 +528,36 @@ def simulate_offset_free_mpc_with_identified_model(A_id: Array, B_id: Array, dt:
         "dhat": dhat,
         "target_x": target_x,
         "target_u": target_u,
+        "target_residual": target_residual,
         "innovation": innovation,
-        "Ae_rank_condition": np.array([np.linalg.matrix_rank(np.block([[np.eye(nx) - A_id, Bd], [C, Cd]]))], dtype=float),
+        "augmented_rank": np.array([np.linalg.matrix_rank(rank_mat)], dtype=float),
+        "augmented_rank_required": np.array([nx + nd], dtype=float),
     }
+
+
+def rmse(a: Array, b: Array) -> Array:
+    return np.sqrt(np.mean((np.asarray(a) - np.asarray(b)) ** 2, axis=0))
+
+
+def spectral_radius(A: Array) -> float:
+    return float(np.max(np.abs(np.linalg.eigvals(A))))
+
+
+def model_metrics(name: str, A: Array, B: Array, data: dict[str, Array], steps: dict[str, Array]) -> dict[str, object]:
+    replay = simulate_discrete_model(A, B, data["u_dev"])
+    metrics: dict[str, object] = {
+        "name": name,
+        "A": A,
+        "B": B,
+        "eigenvalues": np.linalg.eigvals(A),
+        "spectral_radius": spectral_radius(A),
+        "open_loop_replay_rmse_vs_clean": rmse(replay, data["y_dev_clean"]),
+        "A_error_vs_textbook_fro": float(np.linalg.norm(A - A_TEXTBOOK)),
+        "B_error_vs_textbook_fro": float(np.linalg.norm(B - B_TEXTBOOK)),
+    }
+    for case in ["Tc +1 K", "F +0.0002 m3/min"]:
+        metrics[f"{case} rmse_vs_nonlinear"] = rmse(steps[f"{case} {name}"], steps[f"{case} nonlinear"])
+    return metrics
 
 
 def write_csv(path: Path, header: list[str], rows: Array) -> None:
@@ -427,14 +565,16 @@ def write_csv(path: Path, header: list[str], rows: Array) -> None:
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(header)
-        writer.writerows(rows.tolist())
+        writer.writerows(np.asarray(rows, dtype=float).tolist())
 
 
 def save_json(path: Path, payload: dict) -> None:
     def convert(obj):
         if isinstance(obj, np.ndarray):
             if np.iscomplexobj(obj):
-                return [{"real": float(np.real(v)), "imag": float(np.imag(v))} for v in obj.reshape(-1)] if obj.ndim == 1 else [[{"real": float(np.real(v)), "imag": float(np.imag(v))} for v in row] for row in obj]
+                if obj.ndim == 1:
+                    return [{"real": float(np.real(v)), "imag": float(np.imag(v))} for v in obj]
+                return [[{"real": float(np.real(v)), "imag": float(np.imag(v))} for v in row] for row in obj]
             return obj.tolist()
         if isinstance(obj, (np.floating, np.integer)):
             return obj.item()
@@ -443,7 +583,7 @@ def save_json(path: Path, payload: dict) -> None:
         if isinstance(obj, Path):
             return str(obj)
         if isinstance(obj, dict):
-            return {k: convert(v) for k, v in obj.items()}
+            return {str(k): convert(v) for k, v in obj.items()}
         if isinstance(obj, (list, tuple)):
             return [convert(v) for v in obj]
         return obj
@@ -457,19 +597,22 @@ def save_json(path: Path, payload: dict) -> None:
 def plot_identification_data(out_dir: Path, data: dict[str, Array]) -> Path:
     t = data["time"]
     u = data["u_dev"]
-    y = data["y_dev_noisy"]
+    y_clean = data["y_dev_clean"]
+    y_noisy = data["y_dev_noisy"]
     fig, axes = plt.subplots(5, 1, figsize=(11, 10), sharex=True)
     axes[0].step(t[:-1], u[:, 0], where="post")
-    axes[0].set_ylabel("Tc dev [K]")
+    axes[0].set_ylabel(INPUT_NAMES[0])
     axes[1].step(t[:-1], u[:, 1], where="post")
-    axes[1].set_ylabel("F dev [m3/min]")
-    for i, name in enumerate(["c dev", "T dev", "h dev"]):
-        axes[i + 2].plot(t, y[:, i])
+    axes[1].set_ylabel(INPUT_NAMES[1])
+    for i, name in enumerate(STATE_NAMES):
+        axes[i + 2].plot(t, y_clean[:, i], label="clean nonlinear")
+        axes[i + 2].plot(t, y_noisy[:, i], label="noisy measurement", alpha=0.55)
         axes[i + 2].set_ylabel(name)
+        axes[i + 2].legend(fontsize=8)
     axes[-1].set_xlabel("time [min]")
-    fig.suptitle("Exercise 1.63 identification dataset: PRBS inputs and noisy outputs")
     for ax in axes:
         ax.grid(True, alpha=0.3)
+    fig.suptitle("Exercise 1.63 PRBS identification dataset")
     fig.tight_layout()
     path = out_dir / "identification_data.png"
     fig.savefig(path, dpi=160)
@@ -477,47 +620,45 @@ def plot_identification_data(out_dir: Path, data: dict[str, Array]) -> Path:
     return path
 
 
-def plot_fit(out_dir: Path, data: dict[str, Array], A_id: Array, B_id: Array) -> Path:
+def plot_model_replay(out_dir: Path, data: dict[str, Array], models: dict[str, tuple[Array, Array]]) -> Path:
     t = data["time"]
-    y = data["y_dev_noisy"]
-    u = data["u_dev"]
-    y_id = simulate_discrete_model(A_id, B_id, u)
-    y_txt = simulate_discrete_model(A_TEXTBOOK, B_TEXTBOOK, u)
     fig, axes = plt.subplots(3, 1, figsize=(11, 8), sharex=True)
     for i, name in enumerate(STATE_NAMES):
-        axes[i].plot(t, y[:, i], label="noisy nonlinear data", alpha=0.6)
-        axes[i].plot(t, y_id[:, i], label="identified one-step model")
-        axes[i].plot(t, y_txt[:, i], label="textbook linear model", linestyle="--")
+        axes[i].plot(t, data["y_dev_clean"][:, i], label="clean nonlinear", linewidth=2.0)
+        axes[i].plot(t, data["y_dev_noisy"][:, i], label="noisy measurement", alpha=0.25)
+        for model_name, (A, B) in models.items():
+            y_model = simulate_discrete_model(A, B, data["u_dev"])
+            axes[i].plot(t, y_model[:, i], label=model_name, linestyle="--" if model_name == "textbook" else None)
         axes[i].set_ylabel(name)
         axes[i].grid(True, alpha=0.3)
-        axes[i].legend(fontsize=8)
+        axes[i].legend(fontsize=7, ncol=2)
     axes[-1].set_xlabel("time [min]")
-    fig.suptitle("Open-loop replay fit on the identification input sequence")
+    fig.suptitle("Open-loop replay: why raw noisy LS was misleading")
     fig.tight_layout()
-    path = out_dir / "identification_fit.png"
+    path = out_dir / "identification_fit_comparison.png"
     fig.savefig(path, dpi=160)
     plt.close(fig)
     return path
 
 
-def plot_step_tests(out_dir: Path, steps: dict[str, Array]) -> Path:
+def plot_step_tests(out_dir: Path, steps: dict[str, Array], model_names: list[str]) -> Path:
     t = steps["time"]
     cases = ["Tc +1 K", "F +0.0002 m3/min"]
     fig, axes = plt.subplots(3, 2, figsize=(13, 8), sharex=True)
     for col, case in enumerate(cases):
-        for row, name in enumerate(STATE_NAMES):
+        for row, state_name in enumerate(STATE_NAMES):
             ax = axes[row, col]
-            ax.plot(t, steps[f"{case} nonlinear"][:, row], label="nonlinear plant")
-            ax.plot(t, steps[f"{case} textbook"][:, row], label="textbook linear", linestyle="--")
-            ax.plot(t, steps[f"{case} identified"][:, row], label="identified", linestyle=":")
+            ax.plot(t, steps[f"{case} nonlinear"][:, row], label="nonlinear plant", linewidth=2.0)
+            for model_name in model_names:
+                ax.plot(t, steps[f"{case} {model_name}"][:, row], label=model_name)
             ax.set_title(case if row == 0 else "")
-            ax.set_ylabel(name)
+            ax.set_ylabel(state_name)
             ax.grid(True, alpha=0.3)
             if row == 0:
-                ax.legend(fontsize=8)
+                ax.legend(fontsize=7)
     axes[-1, 0].set_xlabel("time [min]")
     axes[-1, 1].set_xlabel("time [min]")
-    fig.suptitle("Step-test comparison: nonlinear plant vs linear models")
+    fig.suptitle("Step-test comparison")
     fig.tight_layout()
     path = out_dir / "step_test_comparison.png"
     fig.savefig(path, dpi=160)
@@ -533,32 +674,28 @@ def plot_closed_loop(out_dir: Path, cl: dict[str, Array]) -> tuple[Path, Path, P
     d = cl["dhat"]
 
     fig, axes = plt.subplots(3, 1, figsize=(11, 8), sharex=True)
-    ylabels = ["c [kmol/m3]", "T [K]", "h [m]"]
-    for i in range(3):
+    for i, label in enumerate(ABS_STATE_NAMES):
         axes[i].plot(t, x[:, i])
-        axes[i].axhline(XS[i], linestyle="--", linewidth=1.0, label="nominal target" if i in (0, 2) else "nominal")
-        axes[i].axvline(10.0, linestyle=":", linewidth=1.2, label="F0 step" if i == 0 else None)
-        axes[i].set_ylabel(ylabels[i])
+        axes[i].axhline(XS[i], linestyle="--", linewidth=1.0, label="nominal")
+        axes[i].axvline(10.0, linestyle=":", linewidth=1.2, label="+10% F0 step" if i == 0 else None)
+        axes[i].set_ylabel(label)
         axes[i].grid(True, alpha=0.3)
         axes[i].legend(fontsize=8)
     axes[-1].set_xlabel("time [min]")
-    fig.suptitle("Closed-loop nonlinear CSTR with identified-model offset-free MPC")
+    fig.suptitle("Closed-loop nonlinear CSTR: selected identified model + offset-free MPC")
     fig.tight_layout()
     path_y = out_dir / "closed_loop_outputs.png"
     fig.savefig(path_y, dpi=160)
     plt.close(fig)
 
     fig, axes = plt.subplots(2, 1, figsize=(11, 6), sharex=True)
-    axes[0].step(tu, u[:, 0], where="post")
-    axes[0].axhline(US[0], linestyle="--", linewidth=1.0)
-    axes[0].set_ylabel("Tc [K]")
-    axes[1].step(tu, u[:, 1], where="post")
-    axes[1].axhline(US[1], linestyle="--", linewidth=1.0)
-    axes[1].set_ylabel("F [m3/min]")
-    axes[1].set_xlabel("time [min]")
-    for ax in axes:
-        ax.axvline(10.0, linestyle=":", linewidth=1.2)
-        ax.grid(True, alpha=0.3)
+    for i, label in enumerate(ABS_INPUT_NAMES):
+        axes[i].step(tu, u[:, i], where="post")
+        axes[i].axhline(US[i], linestyle="--", linewidth=1.0)
+        axes[i].axvline(10.0, linestyle=":", linewidth=1.2)
+        axes[i].set_ylabel(label)
+        axes[i].grid(True, alpha=0.3)
+    axes[-1].set_xlabel("time [min]")
     fig.suptitle("Manipulated inputs")
     fig.tight_layout()
     path_u = out_dir / "closed_loop_inputs.png"
@@ -566,10 +703,11 @@ def plot_closed_loop(out_dir: Path, cl: dict[str, Array]) -> tuple[Path, Path, P
     plt.close(fig)
 
     fig, axes = plt.subplots(3, 1, figsize=(11, 7), sharex=True)
-    for i in range(3):
+    labels = ["d1: c output bias", "d2: h output bias", "d3: F-channel input disturbance"]
+    for i, label in enumerate(labels):
         axes[i].plot(t, d[:, i])
         axes[i].axvline(10.0, linestyle=":", linewidth=1.2)
-        axes[i].set_ylabel(f"d{i+1}")
+        axes[i].set_ylabel(label)
         axes[i].grid(True, alpha=0.3)
     axes[-1].set_xlabel("time [min]")
     fig.suptitle("Estimated integrating disturbances")
@@ -577,21 +715,24 @@ def plot_closed_loop(out_dir: Path, cl: dict[str, Array]) -> tuple[Path, Path, P
     path_d = out_dir / "closed_loop_disturbances.png"
     fig.savefig(path_d, dpi=160)
     plt.close(fig)
-
     return path_y, path_u, path_d
 
 
-def rmse(a: Array, b: Array) -> Array:
-    return np.sqrt(np.mean((a - b) ** 2, axis=0))
-
-
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Exercise 1.63 nonlinear CSTR system-identification sandbox")
-    parser.add_argument("--out", default=None, help="Output directory. Default: ./out/ex_1_63 relative to this file or cwd")
-    parser.add_argument("--samples", type=int, default=700, help="Identification samples")
-    parser.add_argument("--dt", type=float, default=1.0, help="Sample time in min")
+    parser.add_argument("--out", default=None, help="Output directory. Default: ./out/ex_1_63 beside this script")
+    parser.add_argument("--samples", type=int, default=700, help="PRBS identification samples")
+    parser.add_argument("--dt", type=float, default=1.0, help="Sample time [min]")
     parser.add_argument("--seed", type=int, default=163, help="Random seed")
-    args = parser.parse_args()
+    parser.add_argument("--tc-amp", type=float, default=0.20, help="PRBS amplitude for coolant temperature deviation [K]")
+    parser.add_argument("--f-amp", type=float, default=0.00020, help="PRBS amplitude for outlet flow deviation [m3/min]")
+    parser.add_argument("--noise-scale", type=float, default=1.0, help="Multiplier on default measurement noise standard deviations")
+    parser.add_argument("--closed-loop-steps", type=int, default=100, help="Closed-loop simulation length in samples")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
 
     script_dir = Path(__file__).resolve().parent
     out_dir = Path(args.out).expanduser().resolve() if args.out else script_dir / "out" / "ex_1_63"
@@ -600,53 +741,73 @@ def main() -> int:
     rng = np.random.default_rng(args.seed)
     params = CSTRParams()
 
-    data = make_identification_data(args.samples, args.dt, rng, params)
-    A_id, B_id = identify_measured_state_model(data["y_dev_noisy"], data["u_dev"])
-    y_id = simulate_discrete_model(A_id, B_id, data["u_dev"])
-    y_txt = simulate_discrete_model(A_TEXTBOOK, B_TEXTBOOK, data["u_dev"])
+    data = make_identification_data(
+        args.samples,
+        args.dt,
+        rng,
+        params,
+        tc_amp=args.tc_amp,
+        f_amp=args.f_amp,
+        noise_scale=args.noise_scale,
+    )
 
-    steps = step_test_models(A_id, B_id, args.dt, params)
-    cl = simulate_offset_free_mpc_with_identified_model(A_id, B_id, args.dt, params, rng)
+    A_raw, B_raw = identify_measured_state_ls(data["y_dev_noisy"], data["u_dev"])
+    A_clean, B_clean = identify_measured_state_ls(data["y_dev_clean"], data["u_dev"])
+    A_clean, B_clean = project_level_integrator(A_clean, B_clean, args.dt, params)
+    A_fd, B_fd = local_finite_difference_model(args.dt, params)
+    A_selected, B_selected = identify_regularized_noise_aware(
+        data["y_dev_noisy"],
+        data["u_dev"],
+        A_fd,
+        B_fd,
+        args.dt,
+        params,
+        noise_std=data["noise_std"],
+        prior_strength=2.5e-2,
+    )
 
-    plots = {}
+    models: dict[str, tuple[Array, Array]] = {
+        "textbook": (A_TEXTBOOK, B_TEXTBOOK),
+        "raw_noisy_ls": (A_raw, B_raw),
+        "clean_replay_ls": (A_clean, B_clean),
+        "local_finite_difference": (A_fd, B_fd),
+        "regularized_noise_aware": (A_selected, B_selected),
+    }
+
+    steps = step_test_models(models, args.dt, params)
+    metrics = {name: model_metrics(name, A, B, data, steps) for name, (A, B) in models.items()}
+    cl = simulate_offset_free_mpc(A_selected, B_selected, args.dt, params, n_steps=args.closed_loop_steps)
+
+    plots: dict[str, Path] = {}
     plots["identification_data"] = plot_identification_data(out_dir, data)
-    plots["identification_fit"] = plot_fit(out_dir, data, A_id, B_id)
-    plots["step_tests"] = plot_step_tests(out_dir, steps)
+    plots["identification_fit_comparison"] = plot_model_replay(out_dir, data, models)
+    plots["step_test_comparison"] = plot_step_tests(out_dir, steps, list(models.keys()))
     py, pu, pd = plot_closed_loop(out_dir, cl)
     plots["closed_loop_outputs"] = py
     plots["closed_loop_inputs"] = pu
     plots["closed_loop_disturbances"] = pd
 
-    # CSV outputs.
-    t = data["time"]
-    rows = np.column_stack([t, data["y_dev_clean"], data["y_dev_noisy"], np.vstack([data["u_dev"], [np.nan, np.nan]])])
+    rows = np.column_stack([
+        data["time"],
+        data["y_dev_clean"],
+        data["y_dev_noisy"],
+        np.vstack([data["u_dev"], [np.nan, np.nan]]),
+    ])
     write_csv(
         out_dir / "identification_dataset.csv",
         ["time", "c_clean_dev", "T_clean_dev", "h_clean_dev", "c_noisy_dev", "T_noisy_dev", "h_noisy_dev", "Tc_dev", "F_dev"],
         rows,
     )
-    cl_rows = np.column_stack([cl["time"], cl["x_abs"], cl["y_dev"], cl["xhat"], cl["dhat"]])
     write_csv(
         out_dir / "closed_loop_outputs.csv",
         ["time", "c", "T", "h", "c_dev", "T_dev", "h_dev", "xhat_c_dev", "xhat_T_dev", "xhat_h_dev", "d1", "d2", "d3"],
-        cl_rows,
+        np.column_stack([cl["time"], cl["x_abs"], cl["y_dev"], cl["xhat"], cl["dhat"]]),
     )
-    u_rows = np.column_stack([cl["time_u"], cl["u_abs"], cl["u_dev"], cl["target_u"]])
     write_csv(
         out_dir / "closed_loop_inputs.csv",
         ["time", "Tc", "F", "Tc_dev", "F_dev", "target_Tc_dev", "target_F_dev"],
-        u_rows,
+        np.column_stack([cl["time_u"], cl["u_abs"], cl["u_dev"], cl["target_u"]]),
     )
-
-    # Metrics.
-    fit_rmse_id = rmse(y_id, data["y_dev_clean"])
-    fit_rmse_txt = rmse(y_txt, data["y_dev_clean"])
-    step_metrics = {}
-    for case in ["Tc +1 K", "F +0.0002 m3/min"]:
-        step_metrics[case] = {
-            "identified_rmse_vs_nonlinear": rmse(steps[f"{case} identified"], steps[f"{case} nonlinear"]),
-            "textbook_rmse_vs_nonlinear": rmse(steps[f"{case} textbook"], steps[f"{case} nonlinear"]),
-        }
 
     final_offsets = cl["x_abs"][-1] - XS
     result = {
@@ -654,62 +815,80 @@ def main() -> int:
         "sample_time_min": args.dt,
         "identification_samples": args.samples,
         "seed": args.seed,
+        "prbs_amplitudes": {"Tc_dev_K": args.tc_amp, "F_dev_m3_min": args.f_amp},
+        "measurement_noise_std": data["noise_std"],
         "nominal_state_XS": XS,
         "nominal_input_US": US,
         "params": asdict(params),
+        "models": metrics,
+        "selected_model_name": "regularized_noise_aware",
+        "selected_A": A_selected,
+        "selected_B": B_selected,
+        "raw_noisy_A": A_raw,
+        "raw_noisy_B": B_raw,
+        "local_finite_difference_A": A_fd,
+        "local_finite_difference_B": B_fd,
         "textbook_A": A_TEXTBOOK,
         "textbook_B": B_TEXTBOOK,
-        "identified_A": A_id,
-        "identified_B": B_id,
-        "identified_eigenvalues": np.linalg.eigvals(A_id),
-        "textbook_eigenvalues": np.linalg.eigvals(A_TEXTBOOK),
-        "open_loop_replay_rmse_identified_vs_clean": fit_rmse_id,
-        "open_loop_replay_rmse_textbook_vs_clean": fit_rmse_txt,
-        "step_metrics": step_metrics,
-        "augmented_detectability_rank_required": 6,
-        "augmented_detectability_rank_observed": cl["Ae_rank_condition"],
-        "closed_loop_final_offsets_absolute_minus_nominal": final_offsets,
-        "closed_loop_controlled_variable_final_offsets_c_and_h": final_offsets[[0, 2]],
+        "closed_loop": {
+            "disturbance": "+10% inlet flowrate F0 at t = 10 min",
+            "final_offsets_absolute_minus_nominal": final_offsets,
+            "final_controlled_offsets_c_and_h": final_offsets[[0, 2]],
+            "final_input_deviation": cl["u_dev"][-1],
+            "final_disturbance_estimate": cl["dhat"][-1],
+            "augmented_rank_required": cl["augmented_rank_required"],
+            "augmented_rank_observed": cl["augmented_rank"],
+        },
         "plots": {k: str(v) for k, v in plots.items()},
-        "interpretation": {
-            "identification": "The identified model is a 3-state measured-state realization fitted from PRBS data. It is the Python analogue of a third-order ssest workflow for this fully measured CSTR.",
-            "zero_offset": "The closed-loop test uses three integrating disturbances like Example 1.11(c): output disturbances on c and h plus an input disturbance through the F channel. The rank test should be 6 for detectability.",
-            "robustness_warning": "The identified model quality depends on PRBS amplitude, noise, and whether the nonlinear plant remains near the nominal operating point.",
+        "what_went_wrong_in_previous_script": {
+            "errors_in_variables": "The old raw_noisy_ls model regressed noisy y(k+1) on noisy y(k). That biases A because measurement noise is inside the regressor, not just the residual.",
+            "weak_excitation": "The PRBS amplitudes are intentionally small to avoid nonlinear CSTR ignition, so the signal-to-noise ratio is poor, especially for temperature.",
+            "level_integrator_corruption": "The old fit allowed noisy c and T measurements to leak into the level row. The true level dynamics are an integrator driven by inlet minus outlet flow.",
+            "control_consequence": "The corrupted identified model can pass a short replay plot but produce the wrong target/input behavior in the offset-free MPC closed-loop simulation.",
         },
     }
     save_json(out_dir / "ex_1_63_results.json", result)
 
     with (out_dir / "calculation_log.txt").open("w", encoding="utf-8") as f:
-        f.write("Rawlings/Mayne/Diehl MPC - Exercise 1.63 sandbox\n")
+        f.write("Rawlings/Mayne/Diehl MPC - Exercise 1.63 upgraded sandbox\n")
         f.write("System identification of the nonlinear CSTR from Example 1.11\n\n")
         f.write(f"Output directory: {out_dir}\n")
         f.write(f"Sample time: {args.dt} min\n")
         f.write(f"Identification samples: {args.samples}\n")
-        f.write(f"Random seed: {args.seed}\n\n")
-        f.write("Textbook discrete A matrix\n")
-        f.write(np.array2string(A_TEXTBOOK, precision=6) + "\n\n")
-        f.write("Textbook discrete B matrix\n")
-        f.write(np.array2string(B_TEXTBOOK, precision=6) + "\n\n")
-        f.write("Identified A matrix\n")
-        f.write(np.array2string(A_id, precision=6) + "\n\n")
-        f.write("Identified B matrix\n")
-        f.write(np.array2string(B_id, precision=6) + "\n\n")
-        f.write("Eigenvalues\n")
-        f.write(f"  textbook:   {np.linalg.eigvals(A_TEXTBOOK)}\n")
-        f.write(f"  identified: {np.linalg.eigvals(A_id)}\n\n")
-        f.write("Open-loop replay RMSE versus clean nonlinear data [c, T, h]\n")
-        f.write(f"  identified: {fit_rmse_id}\n")
-        f.write(f"  textbook:   {fit_rmse_txt}\n\n")
-        f.write("Step-test RMSE versus nonlinear plant\n")
-        for case, metrics in step_metrics.items():
-            f.write(f"  {case}\n")
-            f.write(f"    identified: {metrics['identified_rmse_vs_nonlinear']}\n")
-            f.write(f"    textbook:   {metrics['textbook_rmse_vs_nonlinear']}\n")
-        f.write("\nOffset-free MPC closed-loop test\n")
+        f.write(f"Random seed: {args.seed}\n")
+        f.write(f"PRBS amplitudes: Tc={args.tc_amp} K, F={args.f_amp} m3/min\n")
+        f.write(f"Measurement noise std: {data['noise_std']}\n\n")
+
+        f.write("What went wrong before\n")
+        f.write("  1. The old script used ordinary least squares on noisy measured states.\n")
+        f.write("  2. That is an errors-in-variables problem; the noise enters y(k), the regressor.\n")
+        f.write("  3. The deliberately small PRBS amplitudes keep the plant local but reduce SNR.\n")
+        f.write("  4. The level row should be an exact integrator, but noisy LS invented false c/T coupling.\n")
+        f.write("  5. A replay plot can look acceptable while the closed-loop target calculation is wrong.\n\n")
+
+        for name, m in metrics.items():
+            f.write(f"Model: {name}\n")
+            f.write("A matrix\n")
+            f.write(np.array2string(np.asarray(m["A"]), precision=7) + "\n")
+            f.write("B matrix\n")
+            f.write(np.array2string(np.asarray(m["B"]), precision=7) + "\n")
+            f.write(f"eigenvalues: {m['eigenvalues']}\n")
+            f.write(f"spectral radius: {m['spectral_radius']}\n")
+            f.write(f"A error vs textbook Frobenius: {m['A_error_vs_textbook_fro']}\n")
+            f.write(f"B error vs textbook Frobenius: {m['B_error_vs_textbook_fro']}\n")
+            f.write(f"open-loop replay RMSE vs clean [c,T,h]: {m['open_loop_replay_rmse_vs_clean']}\n")
+            f.write(f"Tc step RMSE vs nonlinear [c,T,h]: {m['Tc +1 K rmse_vs_nonlinear']}\n")
+            f.write(f"F step RMSE vs nonlinear [c,T,h]: {m['F +0.0002 m3/min rmse_vs_nonlinear']}\n\n")
+
+        f.write("Selected model for closed-loop MPC: regularized_noise_aware\n")
+        f.write("Offset-free MPC closed-loop test\n")
         f.write("  disturbance: +10% inlet flowrate F0 at t = 10 min\n")
-        f.write(f"  augmented detectability rank observed: {cl['Ae_rank_condition'][0]:.0f} / 6\n")
+        f.write(f"  augmented detectability rank observed: {cl['augmented_rank'][0]:.0f} / {cl['augmented_rank_required'][0]:.0f}\n")
         f.write(f"  final output offsets [c-cs, T-Ts, h-hs]: {final_offsets}\n")
-        f.write(f"  final controlled-variable offsets [c-cs, h-hs]: {final_offsets[[0,2]]}\n\n")
+        f.write(f"  final controlled-variable offsets [c-cs, h-hs]: {final_offsets[[0, 2]]}\n")
+        f.write(f"  final input deviation [Tc-Tcs, F-Fs]: {cl['u_dev'][-1]}\n")
+        f.write(f"  final disturbance estimate [d1,d2,d3]: {cl['dhat'][-1]}\n\n")
+
         f.write("Files written\n")
         for name, path in plots.items():
             f.write(f"  {name}: {path}\n")
@@ -718,10 +897,12 @@ def main() -> int:
         f.write("  closed_loop_outputs.csv\n")
         f.write("  closed_loop_inputs.csv\n")
 
-    print(f"Done. Wrote Exercise 1.63 outputs to: {out_dir}")
+    print(f"Done. Wrote Exercise 1.63 upgraded outputs to: {out_dir}")
     print(f"Script: {Path(__file__).resolve()}")
-    print(f"Identified A:\n{A_id}")
-    print(f"Identified B:\n{B_id}")
+    print("Selected identified A:")
+    print(A_selected)
+    print("Selected identified B:")
+    print(B_selected)
     print(f"Final controlled offsets [c, h]: {final_offsets[[0, 2]]}")
     return 0
 
